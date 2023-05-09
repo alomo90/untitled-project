@@ -54,3 +54,6 @@ build/*
 
 *.flaskenv
 *database.db
+
+.venv
+.venv/*
