@@ -5,6 +5,7 @@ import Form from 'react-bootstrap/Form';
 import Button from 'react-bootstrap/Button';
 import Table from 'react-bootstrap/Table';
 import InputGroup from 'react-bootstrap/InputGroup';
+import Modal from 'react-bootstrap/Modal';
 import Toast from 'react-bootstrap/Toast';
 import ToastContainer from 'react-bootstrap/ToastContainer'
 import "./attack.css";
@@ -18,16 +19,15 @@ const initialDefenderValues = {
     "defense": "",
     "flex": "",
     "big_flex": "",
-    "military_bonus": "",
-    "shields": "",
+    "military_bonus": "25",
+    "shields": "10",
 }
 const initialAttackerValues = {
-    "recruits": "",
     "attack": "",
     "flex": "",
     "big_flex": "",
-    "military_bonus": "",
     "generals": "",
+    "buffer": "1.0",
 }
 
 
@@ -39,7 +39,8 @@ function Attack(props) {
     const [loadingCalc, setLoadingCalc] = useState(false);
     const [targetKdInfo, setTargetKdInfo] = useState({});
     const [attackResults, setAttackResults] = useState([]);
-  
+    const [showOverrideModal, setShowOverrideModal] = useState(false);
+
     useEffect(() => {
         if (props.initialKd != undefined) {
             const fetchData = async () => {
@@ -69,16 +70,29 @@ function Attack(props) {
           [name]: value,
         });
     };
-    const onClickAttack = () => {
+    const countUnits = (input) => {
+        var total = 0
+        for (const unit in Object.keys(props.data.state.units || {})) {
+            total += (parseInt(input[unit] || 0));
+        }
+        return total
+    }
+    const onClickAttack = (e, overrideWarning=false) => {
         if (selected != undefined) {
-            const opts = {
-                "attackerValues": attackerValues,
-            };
-            const updateFunc = async () => authFetch('api/attack/' + selected, {
-                method: 'POST',
-                body: JSON.stringify(opts)
-            }).then(r => r.json()).then(r => {setAttackResults(attackResults.concat(r)); setCalcMessage("")})
-            props.updateData(['kingdom', 'projects', 'attackhistory', 'mobis', 'settle', 'structures', 'projects', 'galaxynews'], [updateFunc]);
+            const defenderUnits = countUnits(defenderValues);
+            if (defenderUnits > 0 || overrideWarning || targetKdInfo.hasOwnProperty("units")) {
+                const opts = {
+                    "attackerValues": attackerValues,
+                };
+                const updateFunc = async () => authFetch('api/attack/' + selected, {
+                    method: 'POST',
+                    body: JSON.stringify(opts)
+                }).then(r => r.json()).then(r => {setAttackResults(attackResults.concat(r)); setCalcMessage("")})
+                props.updateData(['kingdom', 'projects', 'attackhistory', 'mobis', 'settle', 'structures', 'projects', 'galaxynews'], [updateFunc]);
+                setShowOverrideModal(false);
+            } else {
+                setShowOverrideModal(true);
+            }
         } else {
             setCalcMessage({"message": "Please select a target in order to attack"})
         }
@@ -93,6 +107,31 @@ function Attack(props) {
                 method: 'POST',
                 body: JSON.stringify(opts)
             }).then(r => r.json()).then(r => setCalcMessage(r))
+            setLoadingCalc(true);
+            await updateFunc();
+            setLoadingCalc(false);
+        } else {
+            setCalcMessage({"message": "Please select a target in order to calculate"})
+        }
+    };
+    const onClickAutofill = async (e) => {
+        if (selected != undefined) {
+            const opts = {
+                "buffer": attackerValues.buffer,
+                "generals": attackerValues.generals,
+                "defenderValues": defenderValues,
+            };
+            const updateFunc = async () => authFetch('api/autofill/' + selected, {
+                method: 'POST',
+                body: JSON.stringify(opts)
+            }).then(r => r.json()).then(r => {
+                setCalcMessage(r);
+                setAttackerValues({
+                  ...attackerValues,
+                  ...r.attacker_units,
+                });
+
+            })
             setLoadingCalc(true);
             await updateFunc();
             setLoadingCalc(false);
@@ -119,6 +158,29 @@ function Attack(props) {
             ["military_bonus"]: props.data.projects.current_bonuses.military_bonus,
         });
     }
+    function getTimeString(date) {
+        if (date === undefined) {
+            return "--"
+        }
+        const hours = Math.abs(Date.parse(date) - Date.now()) / 3.6e6;
+        var n = new Date(0, 0);
+        n.setSeconds(+hours * 60 * 60);
+        return n.toTimeString().slice(0, 8);
+    }
+    const getRemainingSpans = (kdId, revealed) => {
+        if (revealed === undefined) {
+            return []
+        }
+        const remainingSpans = Object.keys(revealed[kdId] || {}).map((category) =>
+            <div key={kdId.toString() + '_' + category} className="remaining-timer">
+                <span className="remaining-time-title">{category}</span>
+                <span className="remaining-time-value">{getTimeString(revealed[kdId][category])}</span>
+                <br />
+            </div>
+        )
+        return remainingSpans;
+    }
+    const revealedStats = getRemainingSpans(selected, props.data.revealed?.revealed);
 
     const toasts = attackResults.map((results, index) =>
         <Toast
@@ -140,6 +202,34 @@ function Attack(props) {
             <ToastContainer position="bottom-end">
                 {toasts}
             </ToastContainer>
+            <Modal
+                show={showOverrideModal}
+                onHide={() => setShowOverrideModal(false)}
+                animation={false}
+                dialogClassName="attack-override-modal"
+            >
+                <Modal.Header closeButton>
+                    <Modal.Title>Attack?</Modal.Title>
+                </Modal.Header>
+                <Modal.Body>
+                    <div>
+                        <span>You're trying to make an attack without inputting any information about the target's units</span>
+                        <br />
+                        <br />
+                        <span>Are you sure?</span>
+                        <br />
+                        <br />
+                        <Button variant="primary" type="submit" onClick={(e) => onClickAttack(e, true)}>
+                            Attack 
+                        </Button>
+                    </div>
+                </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="secondary" onClick={() => setShowOverrideModal(false)}>
+                    Cancel
+                    </Button>
+                </Modal.Footer>
+            </Modal>
             <h2>Attack</h2>
             <form className="attack-kingdom-form">
                 <label id="aria-label" htmlFor="aria-example-input">
@@ -149,7 +239,7 @@ function Attack(props) {
                     className="attack-kingdom-select"
                     options={kingdomOptions}
                     onChange={handleChange}
-                    autoFocus={true}
+                    autoFocus={selected == undefined}
                     defaultValue={kingdomOptions.filter(option => option.value === props.initialKd)}
                     styles={{
                         control: (baseStyles, state) => ({
@@ -533,6 +623,25 @@ function Attack(props) {
                                         />
                                     </td>
                                 </tr>
+                                <tr>
+                                    <td>Autofill Buffer</td>
+                                    <td style={{textAlign: "right"}}></td>
+                                    <td style={{textAlign: "right"}}></td>
+                                    <td style={{textAlign: "right"}}>
+                                        <InputGroup className="mb-3 unit-input-group">
+                                            <Form.Control
+                                                className="unit-form"
+                                                id="buffer-input"
+                                                name="buffer"
+                                                onChange={handleAttackerChange}
+                                                value={attackerValues.buffer || ""} 
+                                                placeholder="1.0"
+                                                autoComplete="off"
+                                            />
+                                            <InputGroup.Text id="basic-addon2" className="unit-input-group-text">%</InputGroup.Text>
+                                        </InputGroup>
+                                    </td>
+                                </tr>
                             </tbody>
                         </Table>
                         <div className="attacker-text-boxes">
@@ -576,6 +685,15 @@ function Attack(props) {
             <div className="attack-buttons">
                 {
                     loadingCalc
+                    ? <Button className="autofill-button" variant="primary" type="submit" disabled>
+                        Loading...
+                    </Button>
+                    : <Button className="autofill-button" variant="primary" type="submit" onClick={onClickAutofill}>
+                        Autofill
+                    </Button>
+                }
+                {
+                    loadingCalc
                     ? <Button className="calculate-button" variant="primary" type="submit" disabled>
                         Loading...
                     </Button>
@@ -593,6 +711,14 @@ function Attack(props) {
                     </Button>
                 }
             </div>
+            {
+                revealedStats.length > 0
+                ? <div className="text-box revealed-stats-box">
+                    <h3>Target's Revealed Stats</h3>
+                    {revealedStats}
+                </div>
+                : null
+            }
             <HelpButton scrollTarget={"attack"}/>
         </div>
     </>

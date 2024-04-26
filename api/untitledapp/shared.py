@@ -18,16 +18,16 @@ UNITS = {
         'hangar_capacity': 1,
     },
     'flex': {
-        'offense': 6,
-        'defense': 6,
-        'cost': 900,
-        'fuel': 2,
-        'hangar_capacity': 2,
+        'offense': 5,
+        'defense': 5,
+        'cost': 550,
+        'fuel': 1,
+        'hangar_capacity': 1,
     },
     'big_flex': {
-        'offense': 9,
-        'defense': 9,
-        'cost': 1350,
+        'offense': 10,
+        'defense': 10,
+        'cost': 1250,
         'fuel': 2,
         'hangar_capacity': 2,
     },
@@ -44,6 +44,12 @@ UNITS = {
         'hangar_capacity': 0,
     }
 }
+
+AUTOFILL_PRIORITY = [
+    "attack",
+    "big_flex",
+    "flex",
+]
 
 STRUCTURES = [
     "homes",
@@ -73,10 +79,224 @@ MISSILES = {
     "galaxy_busters": {
         "stars_damage": 4,
         "fuel_damage": 1000,
-        "pop_damage": 100,
+        "pop_damage": 50,
         "fuel_cost": 4000,
         "cost": 15000,
     },
+}
+
+RACES = [
+    "Gaian",
+    "Vult",
+    "Lumina",
+    "Xo",
+    "Fuzi",
+]
+
+GAME_CONFIG = {
+    "BASE_EPOCH_SECONDS": 30 * 60, 
+
+    "BASE_SETTLE_STARS_POWER": 0.5,
+    "BASE_SETTLE_COST_CONSTANT": 50,
+    "BASE_MAX_SETTLE_CAP": 0.10,
+    "BASE_SETTLE_TIME_MIN_MULTIPLIER": 1,
+    "BASE_SETTLE_TIME_MAX_MUTLIPLIER": 23,
+    "BASE_SETTLE_TIME_SPLITS": 12,
+
+    "BASE_STRUCTURE_STARS_POWER": 0.5,
+    "BASE_STRUCTURE_COST_CONSTANT": 50,
+    "BASE_STRUCTURE_TIME_MIN_MULTIPLIER": 1,
+    "BASE_STRUCTURE_TIME_MAX_MUTLIPLIER": 15,
+    "BASE_STRUCTURE_TIME_SPLITS": 8,
+
+    "BASE_MAX_RECRUITS_CAP": 0.12,
+    "BASE_RECRUIT_COST": 100, 
+    "BASE_RECRUIT_TIME_MIN_MULTIPLIER": 1,
+    "BASE_RECRUIT_TIME_MAX_MUTLIPLIER": 23,
+    "BASE_RECRUIT_TIME_SPLITS": 12,
+
+    "BASE_SPECIALIST_TIME_MIN_MULTIPLIER": 1,
+    "BASE_SPECIALIST_TIME_MAX_MUTLIPLIER": 23,
+    "BASE_SPECIALIST_TIME_SPLITS": 12,
+
+    "BASE_DISBAND_COST_RETURN": 0.25,
+
+    "BASE_ENGINEER_COST": 1000, 
+    "BASE_ENGINEER_TIME_MIN_MULTIPLIER": 1,
+    "BASE_ENGINEER_TIME_MAX_MUTLIPLIER": 23,
+    "BASE_ENGINEER_TIME_SPLITS": 12,
+    "BASE_ENGINEER_PROJECT_POINTS_PER_EPOCH": 1, 
+    "BASE_MAX_ENGINEERS_POP_CAP": 0.05,
+
+    "BASE_HOMES_CAPACITY": 50, 
+    "BASE_HANGAR_CAPACITY": 75, 
+    "BASE_MISSILE_SILO_CAPACITY": 1, 
+    "BASE_WORKSHOP_CAPACITY": 50, 
+    "BASE_MINES_INCOME_PER_EPOCH": 150, 
+    "BASE_FUEL_PLANTS_INCOME_PER_EPOCH": 200, 
+    "BASE_FUEL_PLANTS_CAPACITY": 1000, 
+    "BASE_DRONE_FACTORIES_PRODUCTION_PER_EPOCH": 1, 
+
+    "BASE_STRUCTURES_LOSS_RETURN_RATE": 0.2, 
+    "BASE_STRUCTURES_LOSS_PER_STAR_PER_EPOCH": 0.02,
+    "BASE_STRUCTURES_RAZE_RETURN": 0.25,
+
+    "BASE_MISSILE_TIME_MULTIPLER": 24, 
+
+    "BASE_GENERALS_ATTACK_MODIFIER": 0.03,
+    "BASE_GENERALS_RETURN_TIME_MULTIPLIER": 24, 
+    "BASE_RETURN_TIME_PENALTY_PER_COORDINATE": 0.01, 
+    "BASE_DEFENDER_UNIT_LOSS_RATE": 0.05, 
+    "BASE_ATTACKER_UNIT_LOSS_RATE": 0.05, 
+    "BASE_KINGDOM_LOSS_RATE": 0.10, 
+    "BASE_FUELLESS_STRENGTH_REDUCTION": 0.2, 
+    "BASE_ATTACK_MIN_STARS_GAIN": 25, 
+
+    "BASE_PRIMITIVES_DEFENSE_PER_STAR": 100,
+    "BASE_PRIMITIVES_DEFENSE_EPOCH_MULTIPLER": 24,
+    "BASE_PRIMITIVES_MONEY_PER_STAR": 1000, 
+    "BASE_PRIMITIVES_FUEL_PER_STAR": 100, 
+    "BASE_PRIMITIVES_POPULATION_PER_STAR": 10, 
+    "BASE_PRIMITIVES_ROB_PER_DRONE": 4,
+    "BASE_PRIMITIVES_ROB_EPOCH_MULTIPLIER": 24,
+
+    "BASE_STARS_DRONE_DEFENSE_MULTIPLIER": 4, 
+    "BASE_DRONES_DRONE_DEFENSE_MULTIPLIER": 1, 
+    "BASE_SPY_MIN_SUCCESS_CHANCE": 0.10, 
+    "BASE_DRONES_SUCCESS_LOSS_RATE": 0.01, 
+    "BASE_DRONES_FAILURE_LOSS_RATE": 0.02, 
+    "BASE_DRONES_SHIELDING_LOSS_REDUCTION": 0.5, 
+    "BASE_REVEAL_DURATION_MULTIPLIER": 16, 
+    "BASE_DRONE_GADGETS_LOSS_REDUCTION": 0.25,
+
+    "BASE_MAX_SHARE_CUT": 0.15, 
+
+    "BASE_DRONES_SIPHON_PER_DRONE": 8, 
+    "BASE_DRONES_SIPHON_TIME_MULTIPLIER": 12, 
+    "BASE_DRONES_PER_HOME_DAMAGE": 1500, 
+    "BASE_DRONES_MAX_HOME_DAMAGE": 0.05, 
+    "BASE_DRONES_PER_FUEL_PLANT_DAMAGE": 1500, 
+    "BASE_DRONES_MAX_FUEL_PLANT_DAMAGE": 0.05, 
+    "BASE_DRONES_PER_KIDNAP": 10, 
+    "BASE_DRONES_MAX_KIDNAP_DAMAGE": 0.05, 
+    "BASE_DRONES_SUICIDE_FUEL_DAMAGE": 5, 
+    "BASE_KIDNAP_RETURN_RATE": 0.4, 
+
+    "BASE_MAX_SIPHON": 0.15, 
+
+    "BASE_POP_INCOME_PER_EPOCH": 2, 
+    "BASE_POP_FUEL_CONSUMPTION_PER_EPOCH": 0.5, 
+    "BASE_PCT_POP_GROWTH_PER_EPOCH": 0.10, 
+    "BASE_POP_GROWTH_PER_STAR_PER_EPOCH": 0.5, 
+    "BASE_FUELLESS_POP_GROWTH_REDUCTION": 0.9, 
+    "BASE_FUELLESS_POP_CAP_REDUCTION": 0.2, 
+    "BASE_NEGATIVE_FUEL_PER_STAR": 5,
+
+    "BASE_PCT_POP_LOSS_PER_EPOCH": 0.10, 
+    "BASE_POP_LOSS_PER_STAR_PER_EPOCH": 0.2, 
+
+    "BASE_SPY_ATTEMPT_TIME_MULTIPLIER": 2, 
+    "BASE_SPY_ATTEMPTS_MAX": 10, 
+
+    "BASE_MILITARY_SHIELDS_MAX": 0.10, 
+    "BASE_MILITARY_SHIELDS_COST_PER_LAND_PER_PCT": 0.1, 
+    "BASE_SPY_SHIELDS_MAX": 0.20, 
+    "BASE_SPY_SHIELDS_COST_PER_LAND_PER_PCT": 0.05, 
+    "BASE_SPY_RADAR_MAX": 0.20, 
+    "BASE_SPY_RADAR_COST_PER_LAND_PER_PCT": 0.05, 
+    "BASE_MISSILES_SHIELDS_MAX": 1.0, 
+    "BASE_MISSILES_SHIELDS_COST_PER_LAND_PER_PCT": 0.005, 
+
+    "BASE_VOTES_COST": 10000, 
+    "BASE_ELECTION_LENGTH_MULTIPLIER": 24, 
+    "BASE_ELECTION_RESULTS_DURATION_MULTIPLIER": 24 * 6, 
+
+    "BASE_AUTO_SPENDING_TIME_MULTIPLIER": 0.1, 
+
+    "BASE_EXPANSIONIST_SETTLE_REDUCTION": 0.15,
+    "BASE_WARLIKE_RETURN_REDUCTION": 0.1,
+    "BASE_INTELLIGENCE_RETURN_REDUCTION": 0.1,
+    "BASE_CONSCRIPTION_TIME_REDUCTION": 0.2,
+    "BASE_UNREGULATED_COST_REDUCTION": 0.2,
+    "BASE_TREATIED_COST_INCREASE": 0.2,
+    "BASE_FREE_TRADE_INCREASE": 0.1,
+    "BASE_ISOLATIONIST_DECREASE": 0.1,
+
+    "NETWORTH_VALUES": {
+        "stars": 25,
+        "structures": 25,
+        "money": 0.002,
+        "attack": 7,
+        "defense": 8,
+        "flex": 10,
+        "big_flex": 20,
+        "recruits": 2,
+        "engineers": 18,
+    },
+
+    "NETWORTH_POINTS": [
+        25,
+        18,
+        15,
+        12,
+        10,
+        8,
+        6,
+        4,
+        2,
+        1,
+    ],
+
+    "GAIAN_SETTLE_COST_REDUCTION": 0.2,
+    "GAIAN_SETTLE_TIME_REDUCTION": 0.1,
+    "GAIAN_DEFENSE_REDUCTION": 0.1,
+
+    "VULT_DRONE_PRODUCTION_INCREASE": 0.2,
+    "VULT_POPULATION_REDUCTION": 0.1,
+
+    "LUMINA_FUEL_PRODUCTION_INCREASE": 0.5,
+    "LUMINA_OFFENSE_REDUCTION": 0.2,
+
+    "XO_ATTACK_GAINS_INCREASE": 0.2,
+    "XO_ATTACK_UNIT_LOSSES_REDUCTION": 0.4,
+    "XO_WORKSHOP_CAPACITY_REDUCTION": 0.5,
+
+    "FUZI_MISSILE_SHIELDS_MAX": 0.5,
+    "FUZI_MISSILE_COST_REDUCTION": 0.3,
+    "FUZI_MISSILE_SILO_CAPACITY_INCREASE": 1.0,
+
+    "AGGRO_METER_PER_KD": 10,
+    "AGGRO_METER_DECAY_PER_KD_PER_EPOCH": 0.25,
+    "AGGRO_PER_ATTACK": 10,
+    "AGGRO_PER_AGGRO_SPY": 2,
+
+    "DENOUNCE_AGGRO_METER_INCREASE": 0.2,
+    "DENOUNCE_OFFENSE_BONUS": 0.05,
+    "DENOUNCE_DURATION_MULTIPLIER": 48,
+    "DENOUNCE_COOLDOWN_MULTIPLIER": 48,
+
+    "PEACE_DURATION_MULTIPLIER": 48,
+    "PEACE_DEFENSE_BONUS": 0.5,
+    "PEACE_PROBE_DEFENSE_BONUS": 0.5,
+
+    "WAR_OFFENSE_INCREASE": 0.1,
+    "WAR_GAINS_INCREASE": 0.2,
+    "WAR_LOSSES_INCREASE": 0.2,
+
+    "SURPRISE_WAR_PENALTY_OFFENSE_INCREASE": 0.1,
+    "SURPRISE_WAR_PENALTY_MULTIPLIER": 48,
+}
+
+GAME_FUNCS = {
+    "BASE_SETTLE_COST": lambda stars: math.floor((stars ** GAME_CONFIG["BASE_SETTLE_STARS_POWER"]) * GAME_CONFIG["BASE_SETTLE_COST_CONSTANT"]), 
+    "BASE_MAX_SETTLE": lambda stars: math.floor(stars * GAME_CONFIG["BASE_MAX_SETTLE_CAP"]), 
+    "BASE_STRUCTURE_COST": lambda stars: math.floor((stars ** GAME_CONFIG["BASE_STRUCTURE_STARS_POWER"]) * GAME_CONFIG["BASE_STRUCTURE_COST_CONSTANT"]), 
+    "BASE_MAX_RECRUITS": lambda pop: math.floor(pop * GAME_CONFIG["BASE_MAX_RECRUITS_CAP"]), 
+    "BASE_MAX_ENGINEERS": lambda pop: math.floor(pop * GAME_CONFIG["BASE_MAX_ENGINEERS_POP_CAP"]), 
+    "BASE_GENERALS_BONUS": lambda generals: (generals - 1) * GAME_CONFIG["BASE_GENERALS_ATTACK_MODIFIER"], 
+    "BASE_PRIMITIVES_DEFENSE_PER_STAR": lambda seconds: GAME_CONFIG["BASE_PRIMITIVES_DEFENSE_PER_STAR"] * math.sqrt(1 + seconds / (GAME_CONFIG["BASE_EPOCH_SECONDS"] * GAME_CONFIG["BASE_PRIMITIVES_DEFENSE_EPOCH_MULTIPLER"])), 
+    "BASE_PRIMITIVES_ROB_PER_DRONE": lambda seconds: GAME_CONFIG["BASE_PRIMITIVES_ROB_PER_DRONE"] / math.sqrt(1 + seconds / (GAME_CONFIG["BASE_EPOCH_SECONDS"] * GAME_CONFIG["BASE_PRIMITIVES_ROB_EPOCH_MULTIPLIER"])), 
+    "BASE_NEGATIVE_FUEL_CAP": lambda stars: stars * -GAME_CONFIG["BASE_NEGATIVE_FUEL_PER_STAR"], 
 }
 
 PROJECTS = {
@@ -143,7 +363,7 @@ PROJECTS = {
     "drone_gadgets": {
         "stars_power": 0,
         "constant": 50000,
-        "desc": "Unlocks the Spy Bonus project",
+        "desc": f"Unlocks the Spy Bonus project. Reduces drone losses by {GAME_CONFIG['BASE_DRONE_GADGETS_LOSS_REDUCTION']:.1%}",
         "name": "Drone Gadgets",
     },
 }
@@ -165,159 +385,6 @@ ONE_TIME_PROJECTS = [
     "galaxy_busters",
     "drone_gadgets",
 ]
-
-GAME_CONFIG = {
-    "BASE_EPOCH_SECONDS": 60 * 60, 
-
-    "BASE_SETTLE_STARS_POWER": 0.5,
-    "BASE_SETTLE_COST_CONSTANT": 50,
-    "BASE_MAX_SETTLE_CAP": 0.15,
-    "BASE_SETTLE_TIME_MULTIPLIER": 12, 
-
-    "BASE_STRUCTURE_STARS_POWER": 0.5,
-    "BASE_STRUCTURE_COST_CONSTANT": 50,
-    "BASE_STRUCTURE_TIME_MULTIPLIER": 8, 
-
-    "BASE_MAX_RECRUITS_CAP": 0.12,
-    "BASE_RECRUIT_COST": 100, 
-    "BASE_RECRUIT_TIME_MULTIPLIER": 12, 
-
-    "BASE_SPECIALIST_TIME_MULTIPLIER": 12, 
-
-    "BASE_ENGINEER_COST": 1000, 
-    "BASE_ENGINEER_TIME_MULTIPLIER": 12, 
-    "BASE_ENGINEER_PROJECT_POINTS_PER_EPOCH": 1, 
-    "BASE_MAX_ENGINEERS_POP_CAP": 0.05,
-
-    "BASE_HOMES_CAPACITY": 50, 
-    "BASE_HANGAR_CAPACITY": 75, 
-    "BASE_MISSILE_SILO_CAPACITY": 1, 
-    "BASE_WORKSHOP_CAPACITY": 50, 
-    "BASE_MINES_INCOME_PER_EPOCH": 150, 
-    "BASE_FUEL_PLANTS_INCOME_PER_EPOCH": 200, 
-    "BASE_FUEL_PLANTS_CAPACITY": 1000, 
-    "BASE_DRONE_FACTORIES_PRODUCTION_PER_EPOCH": 1, 
-
-    "BASE_STRUCTURES_LOSS_RETURN_RATE": 0.2, 
-    "BASE_STRUCTURES_LOSS_PER_STAR_PER_EPOCH": 0.02, 
-
-    "BASE_MISSILE_TIME_MULTIPLER": 24, 
-
-    "BASE_GENERALS_ATTACK_MODIFIER": 0.03,
-    "BASE_GENERALS_RETURN_TIME_MULTIPLIER": 12, 
-    "BASE_RETURN_TIME_PENALTY_PER_COORDINATE": 0.01, 
-    "BASE_DEFENDER_UNIT_LOSS_RATE": 0.05, 
-    "BASE_ATTACKER_UNIT_LOSS_RATE": 0.05, 
-    "BASE_KINGDOM_LOSS_RATE": 0.10, 
-    "BASE_FUELLESS_STRENGTH_REDUCTION": 0.2, 
-    "BASE_ATTACK_MIN_STARS_GAIN": 25, 
-
-    "BASE_PRIMITIVES_DEFENSE_PER_STAR": 100,
-    "BASE_PRIMITIVES_DEFENSE_EPOCH_MULTIPLER": 24,
-    "BASE_PRIMITIVES_MONEY_PER_STAR": 1000, 
-    "BASE_PRIMITIVES_FUEL_PER_STAR": 100, 
-    "BASE_PRIMITIVES_POPULATION_PER_STAR": 10, 
-    "BASE_PRIMITIVES_ROB_PER_DRONE": 4,
-    "BASE_PRIMITIVES_ROB_EPOCH_MULTIPLIER": 24,
-
-    "BASE_STARS_DRONE_DEFENSE_MULTIPLIER": 4, 
-    "BASE_DRONES_DRONE_DEFENSE_MULTIPLIER": 1, 
-    "BASE_SPY_MIN_SUCCESS_CHANCE": 0.10, 
-    "BASE_DRONES_SUCCESS_LOSS_RATE": 0.01, 
-    "BASE_DRONES_FAILURE_LOSS_RATE": 0.02, 
-    "BASE_DRONES_SHIELDING_LOSS_REDUCTION": 0.5, 
-    "BASE_REVEAL_DURATION_MULTIPLIER": 8, 
-
-    "BASE_MAX_SHARE_CUT": 0.15, 
-
-    "BASE_DRONES_SIPHON_PER_DRONE": 8, 
-    "BASE_DRONES_SIPHON_TIME_MULTIPLIER": 8, 
-    "BASE_DRONES_PER_HOME_DAMAGE": 1500, 
-    "BASE_DRONES_MAX_HOME_DAMAGE": 0.05, 
-    "BASE_DRONES_PER_FUEL_PLANT_DAMAGE": 1500, 
-    "BASE_DRONES_MAX_FUEL_PLANT_DAMAGE": 0.05, 
-    "BASE_DRONES_PER_KIDNAP": 10, 
-    "BASE_DRONES_MAX_KIDNAP_DAMAGE": 0.05, 
-    "BASE_DRONES_SUICIDE_FUEL_DAMAGE": 5, 
-    "BASE_KIDNAP_RETURN_RATE": 0.4, 
-
-    "BASE_MAX_SIPHON": 0.10, 
-
-    "BASE_POP_INCOME_PER_EPOCH": 2, 
-    "BASE_POP_FUEL_CONSUMPTION_PER_EPOCH": 0.5, 
-    "BASE_PCT_POP_GROWTH_PER_EPOCH": 0.10, 
-    "BASE_POP_GROWTH_PER_STAR_PER_EPOCH": 0.5, 
-    "BASE_FUELLESS_POP_GROWTH_REDUCTION": 0.9, 
-    "BASE_FUELLESS_POP_CAP_REDUCTION": 0.2, 
-    "BASE_NEGATIVE_FUEL_PER_STAR": 5,
-
-    "BASE_PCT_POP_LOSS_PER_EPOCH": 0.10, 
-    "BASE_POP_LOSS_PER_STAR_PER_EPOCH": 0.2, 
-
-    "BASE_SPY_ATTEMPT_TIME_MULTIPLIER": 1, 
-    "BASE_SPY_ATTEMPTS_MAX": 10, 
-
-    "BASE_MILITARY_SHIELDS_MAX": 0.10, 
-    "BASE_MILITARY_SHIELDS_COST_PER_LAND_PER_PCT": 0.1, 
-    "BASE_SPY_SHIELDS_MAX": 0.20, 
-    "BASE_SPY_SHIELDS_COST_PER_LAND_PER_PCT": 0.05, 
-    "BASE_SPY_RADAR_MAX": 0.20, 
-    "BASE_SPY_RADAR_COST_PER_LAND_PER_PCT": 0.05, 
-    "BASE_MISSILES_SHIELDS_MAX": 1.0, 
-    "BASE_MISSILES_SHIELDS_COST_PER_LAND_PER_PCT": 0.005, 
-
-    "BASE_VOTES_COST": 10000, 
-    "BASE_ELECTION_LENGTH_MULTIPLIER": 24, 
-    "BASE_ELECTION_RESULTS_DURATION_MULTIPLIER": 24 * 6, 
-
-    "BASE_AUTO_SPENDING_TIME_MULTIPLIER": 0.1, 
-
-    "BASE_EXPANSIONIST_SETTLE_REDUCTION": 0.15,
-    "BASE_WARLIKE_RETURN_REDUCTION": 0.1,
-    "BASE_INTELLIGENCE_RETURN_REDUCTION": 0.1,
-    "BASE_CONSCRIPTION_TIME_REDUCTION": 0.2,
-    "BASE_UNREGULATED_COST_REDUCTION": 0.2,
-    "BASE_TREATIED_COST_INCREASE": 0.2,
-    "BASE_FREE_TRADE_INCREASE": 0.1,
-    "BASE_ISOLATIONIST_DECREASE": 0.1,
-
-    "NETWORTH_VALUES": {
-        "stars": 25,
-        "structures": 25,
-        "money": 0.002,
-        "attack": 7,
-        "defense": 8,
-        "flex": 16,
-        "big_flex": 24,
-        "recruits": 2,
-        "engineers": 18,
-    },
-
-    "NETWORTH_POINTS": [
-        25,
-        18,
-        15,
-        12,
-        10,
-        8,
-        6,
-        4,
-        2,
-        1,
-    ],
-}
-
-GAME_FUNCS = {
-    "BASE_SETTLE_COST": lambda stars: math.floor((stars ** GAME_CONFIG["BASE_SETTLE_STARS_POWER"]) * GAME_CONFIG["BASE_SETTLE_COST_CONSTANT"]), 
-    "BASE_MAX_SETTLE": lambda stars: math.floor(stars * GAME_CONFIG["BASE_MAX_SETTLE_CAP"]), 
-    "BASE_STRUCTURE_COST": lambda stars: math.floor((stars ** GAME_CONFIG["BASE_STRUCTURE_STARS_POWER"]) * GAME_CONFIG["BASE_STRUCTURE_COST_CONSTANT"]), 
-    "BASE_MAX_RECRUITS": lambda pop: math.floor(pop * GAME_CONFIG["BASE_MAX_RECRUITS_CAP"]), 
-    "BASE_MAX_ENGINEERS": lambda pop: math.floor(pop * GAME_CONFIG["BASE_MAX_ENGINEERS_POP_CAP"]), 
-    "BASE_GENERALS_BONUS": lambda generals: (generals - 1) * GAME_CONFIG["BASE_GENERALS_ATTACK_MODIFIER"], 
-    "BASE_PRIMITIVES_DEFENSE_PER_STAR": lambda seconds: GAME_CONFIG["BASE_PRIMITIVES_DEFENSE_PER_STAR"] * math.sqrt(1 + seconds / (GAME_CONFIG["BASE_EPOCH_SECONDS"] * GAME_CONFIG["BASE_PRIMITIVES_DEFENSE_EPOCH_MULTIPLER"])), 
-    "BASE_PRIMITIVES_ROB_PER_DRONE": lambda seconds: GAME_CONFIG["BASE_PRIMITIVES_ROB_PER_DRONE"] / math.sqrt(1 + seconds / (GAME_CONFIG["BASE_EPOCH_SECONDS"] * GAME_CONFIG["BASE_PRIMITIVES_DEFENSE_EPOCH_MULTIPLER"])), 
-    "BASE_NEGATIVE_FUEL_CAP": lambda stars: stars * -GAME_CONFIG["BASE_NEGATIVE_FUEL_PER_STAR"], 
-}
 
 REVEAL_OPERATIONS = [
     "spykingdom",
@@ -344,7 +411,7 @@ INITIAL_KINGDOM_STATE = {
         "name": "",
         "race": "",
         "status": "Active",
-        "coordinate": random.randint(0, 99),
+        "coordinate": 0,
         "last_income": "",
         "next_resolve": {
             "generals": DATE_SENTINEL,
@@ -439,13 +506,13 @@ INITIAL_KINGDOM_STATE = {
             "galaxy_busters": 0,
             "drone_gadgets": 0
         },
-        "auto_assign_projects": False,
+        "auto_assign_projects": True,
         "projects_target": {
-            "pop_bonus": 0,
-            "fuel_bonus": 0,
-            "military_bonus": 0,
-            "money_bonus": 0,
-            "general_bonus": 0,
+            "pop_bonus": 0.2,
+            "fuel_bonus": 0.2,
+            "military_bonus": 0.2,
+            "money_bonus": 0.2,
+            "general_bonus": 0.2,
             "spy_bonus": 0,
             "big_flexers": 0,
             "star_busters": 0,
@@ -488,7 +555,9 @@ INITIAL_KINGDOM_STATE = {
             "spy_radar": 0.0,
             "missiles": 0.0
         },
+        "income": {},
         "schedule": [],
+        "siphons": [],
     },
     "siphons_in": {"siphons_in": []},
     "siphons_out": {"siphons_out": []},
@@ -514,6 +583,23 @@ INITIAL_KINGDOM_STATE = {
     "attack_history": {"attack_history": []},
     "missile_history": {"missile_history": []},
     "messages": {"messages": []},
+    "notifs": {
+        "news_kingdom": 0,
+        "news_galaxy": 0,
+        "messages": 0,
+        "shared": 0,
+    },
+    "history": {
+        "history": {
+            "networth": [],
+            "stars": [],
+            "population": [],
+            "drones": [],
+            "engineers": [],
+            "max_offense": [],
+            "max_defense": [],
+        }
+    },
 }
 
 KINGDOM_CREATOR_STARTING_POINTS = 20000
@@ -522,7 +608,7 @@ KINGDOM_CREATOR_POINTS = {
     "recruits": 1,
     "attack": 5,
     "defense": 5,
-    "flex": 10,
+    "flex": 8,
     "engineers": 10,
 }
 
@@ -613,4 +699,15 @@ PRETTY_NAMES = {
     "planet_busters": "Planet Busters",
     "star_busters": "Star Busters",
     "galaxy_busters": "Galaxy Busters",
+    "stars": "Stars",
+    "structures": "Structures",
+    "money": "Money",
+}
+
+SURRENDER_OPTIONS = {
+    "stars": [
+        0,
+        0.05,
+        0.1,
+    ]
 }

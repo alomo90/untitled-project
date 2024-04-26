@@ -5,6 +5,7 @@ import 'bootstrap/dist/css/bootstrap.css';
 import Form from 'react-bootstrap/Form';
 import InputGroup from 'react-bootstrap/InputGroup';
 import Button from 'react-bootstrap/Button';
+import Select from 'react-select';
 import "./createkingdom.css";
 import HelpButton from "../components/helpbutton";
 
@@ -29,10 +30,12 @@ const initialUnitsChoices = {
 
 function CreateKingdom(props) {
     const [kdName, setKdName] = useState("");
-    const [kdMessage, setKdMessage] = useState("");
+    const [kdMessage, setKdMessage] = useState({});
     const [createKingdomData, setCreateKingdomData] = useState({});
     const [structuresChoices, setStructuresChoices] = useState(initialStructuresChoices);
     const [unitsChoices, setUnitsChoices] = useState(initialUnitsChoices);
+    const [race, setRace] = useState();
+    const [createLoading, setCreateLoading] = useState(false);
     const navigate = useNavigate();
     
     useEffect(() => {
@@ -63,17 +66,21 @@ function CreateKingdom(props) {
         [name]: value,
         });
     };
+    const handleRaceChange = (selectedOption) => {
+        setRace(selectedOption.value);
+    };
 
     const onSubmitNameClick = (e)=>{
         if (kdName != "") {
             let opts = {
                 'kdName': kdName,
             };
-            setKdMessage("")
+            setKdMessage("");
+            setCreateLoading(true);
             const updateFunc = () => authFetch('api/createkingdom', {
                 method: 'post',
                 body: JSON.stringify(opts)
-            }).then(r => r.json()).then(r => setKdMessage(r))
+            }).then(r => r.json()).then(r => {setKdMessage(r);setCreateLoading(false)})
             props.updateData(['kingdomid'], [updateFunc])
         }
     }
@@ -82,17 +89,19 @@ function CreateKingdom(props) {
         let opts = {
             'unitsChoices': unitsChoices,
             'structuresChoices': structuresChoices,
+            'race': race || "",
         };
         setKdMessage("")
         const updateFunc = () => authFetch('api/createkingdomchoices', {
             method: 'post',
             body: JSON.stringify(opts)
         }).then(r => r.json()).then(r => setKdMessage(r))
-        props.updateData(['all'], [updateFunc])
+        props.updateData(['kingdomid'], [updateFunc])
     }
 
     const onClickGoHome = (e)=>{
         navigate("/status")
+        props.updateData(['all'], [])
     }
 
     if (Object.keys(createKingdomData).length === 0) {
@@ -102,9 +111,6 @@ function CreateKingdom(props) {
         return <h2>Loading...</h2>
     }
 
-    if (kdMessage != "" && kdMessage == props.kingdomid.kd_id) {
-        setKdMessage("");
-    }
     const calcStructuresRemaining = (structuresData, availableStructures) => {
         var total = 0
         for (const structure in structuresData) {
@@ -167,6 +173,8 @@ function CreateKingdom(props) {
     const droneProduction = structuresChoices.drone_factories * props.state.structures.drone_production_per_drone_plant;
     const missileCapacity = structuresChoices.missile_silos * props.state.structures.missile_capacity_per_missile_silo;
     const workshopCapacity = structuresChoices.workshops * props.state.structures.engineers_capacity_per_workshop;
+    
+    const raceOptions = props.state.races.map(race => ({value: race, "label": race}))
     return (
         <div>
         {
@@ -185,7 +193,7 @@ function CreateKingdom(props) {
                         autoComplete="off"
                     />
                 </InputGroup>
-                {props.loading.kingdomid
+                {createLoading
                 ? <Button className="submit-name-button" variant="primary" type="submit" disabled>
                     Loading...
                 </Button>
@@ -194,8 +202,8 @@ function CreateKingdom(props) {
                 </Button>
                 }
                 {
-                    kdMessage !== ""
-                    ? <h4>{kdMessage}</h4>
+                    kdMessage.message !== ""
+                    ? <h4>{kdMessage.message}</h4>
                     : null
                 }
             </div>
@@ -384,6 +392,41 @@ function CreateKingdom(props) {
                         </div>
                     </div>
                 </div>
+                <form className="race-form">
+                    <label id="aria-label" htmlFor="aria-example-input">
+                        Select a Race
+                    </label>
+                    <Select id="select-race" className="race-select" options={raceOptions} onChange={handleRaceChange} autoFocus={false} 
+                        styles={{
+                            control: (baseStyles, state) => ({
+                                ...baseStyles,
+                                borderColor: state.isFocused ? 'var(--bs-body-color)' : 'var(--bs-primary-text)',
+                                backgroundColor: 'var(--bs-body-bg)',
+                            }),
+                            placeholder: (baseStyles, state) => ({
+                                ...baseStyles,
+                                color: 'var(--bs-primary-text)',
+                            }),
+                            input: (baseStyles, state) => ({
+                                ...baseStyles,
+                                color: 'var(--bs-secondary-text)',
+                            }),
+                            option: (baseStyles, state) => ({
+                                ...baseStyles,
+                                backgroundColor: state.isFocused ? 'var(--bs-primary-bg-subtle)' : 'var(--bs-secondary-bg-subtle)',
+                                color: state.isFocused ? 'var(--bs-primary-text)' : 'var(--bs-secondary-text)',
+                            }),
+                            menuList: (baseStyles, state) => ({
+                                ...baseStyles,
+                                backgroundColor: 'var(--bs-secondary-bg)',
+                                // borderColor: 'var(--bs-secondary-bg)',
+                            }),
+                            singleValue: (baseStyles, state) => ({
+                                ...baseStyles,
+                                color: 'var(--bs-secondary-text)',
+                            }),
+                        }}/>
+                </form>
                 {props.loading.kingdomid
                 ? <Button className="submit-kingdom-button" variant="primary" type="submit" disabled>
                     Loading...
@@ -393,8 +436,8 @@ function CreateKingdom(props) {
                 </Button>
                 }
                 {
-                    kdMessage !== ""
-                    ? <h4>{kdMessage}</h4>
+                    kdMessage.message !== ""
+                    ? <h4>{kdMessage.message}</h4>
                     : null
                 }
                 <div className="text-box kingdom-card">

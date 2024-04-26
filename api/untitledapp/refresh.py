@@ -33,7 +33,15 @@ def _calc_pop_change_per_epoch(
     max_hangar_capacity, current_hangar_capacity = uag._calc_hangar_capacity(kd_info_parse, units)
 
     overflow = max(current_hangar_capacity - max_hangar_capacity, 0)
-    pop_capacity = math.floor(kd_info_parse["structures"]["homes"] * uas.GAME_CONFIG["BASE_HOMES_CAPACITY"] * (1 - int_fuelless * uas.GAME_CONFIG["BASE_FUELLESS_POP_CAP_REDUCTION"]))
+    pop_capacity = math.floor(
+        kd_info_parse["structures"]["homes"]
+        * uas.GAME_CONFIG["BASE_HOMES_CAPACITY"]
+        * (
+            1 
+            - (int_fuelless * uas.GAME_CONFIG["BASE_FUELLESS_POP_CAP_REDUCTION"])
+            - (int(kd_info_parse["race"] == "Vult") * uas.GAME_CONFIG["VULT_POPULATION_REDUCTION"])
+        )
+    )
     
     pop_capacity_less_overflow = max(pop_capacity - overflow, 0)
 
@@ -114,6 +122,8 @@ def _calc_siphons(
             "new_siphons": {
                 "from": kd_id,
                 "siphon": siphon_money,
+                "time": time_expiry.isoformat(),
+                "remaining_siphon": siphon_out["siphon"] - siphon_money,
             }
         }
         siphons_in_response = REQUESTS_SESSION.patch(
@@ -148,7 +158,7 @@ def _calc_siphons(
         headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
         data=json.dumps(resolve_siphons_in_payload),
     )
-    return siphon_pool, siphon_in_income
+    return siphon_pool, siphon_in_income, siphons_in
 
 def _calc_networth(
     kd_info_parse,
@@ -199,7 +209,7 @@ def _kingdom_with_income(
         income["money"]["mines"]
         + income["money"]["population"]
     ) * (1 + income["money"]["bonus"])
-    income["money"]["siphons_out"], income["money"]["siphons_in"] = _calc_siphons(
+    income["money"]["siphons_out"], income["money"]["siphons_in"], siphons_in = _calc_siphons(
         income["money"]["gross"],
         kd_info_parse["kdId"],
         time_now,
@@ -219,7 +229,7 @@ def _kingdom_with_income(
             total_units[key_unit] += value_unit
 
     income["fuel"]["fuel_plants"] = math.floor(kd_info_parse["structures"]["fuel_plants"]) * uas.GAME_CONFIG["BASE_FUEL_PLANTS_INCOME_PER_EPOCH"]
-    income["fuel"]["bonus"] = current_bonuses["fuel_bonus"]
+    income["fuel"]["bonus"] = current_bonuses["fuel_bonus"] + (int(kd_info_parse["race"] == "Lumina") * uas.GAME_CONFIG["LUMINA_FUEL_PRODUCTION_INCREASE"])
     income["fuel"]["units"] = {}
     for key_unit, value_units in total_units.items():
         income["fuel"]["units"][key_unit] = value_units * uas.UNITS[key_unit]["fuel"]
@@ -241,7 +251,14 @@ def _kingdom_with_income(
     max_fuel = math.floor(kd_info_parse["structures"]["fuel_plants"]) * uas.GAME_CONFIG["BASE_FUEL_PLANTS_CAPACITY"]
     min_fuel = uas.GAME_FUNCS["BASE_NEGATIVE_FUEL_CAP"](kd_info_parse["stars"])
 
-    income["drones"] = math.floor(kd_info_parse["structures"]["drone_factories"]) * uas.GAME_CONFIG["BASE_DRONE_FACTORIES_PRODUCTION_PER_EPOCH"]
+    income["drones"] = (
+        math.floor(kd_info_parse["structures"]["drone_factories"])
+        * uas.GAME_CONFIG["BASE_DRONE_FACTORIES_PRODUCTION_PER_EPOCH"]
+        * (
+            1
+            + (int(kd_info_parse["race"] == "Vult") * uas.GAME_CONFIG["VULT_DRONE_PRODUCTION_INCREASE"])
+        )
+    )
     new_drones = income["drones"] * epoch_elapsed
 
     fuelless = kd_info_parse["fuel"] <= 0
@@ -257,11 +274,12 @@ def _kingdom_with_income(
     new_kd_info = kd_info_parse.copy()
     for key_project, new_points in new_project_points.items():
         new_kd_info["projects_points"][key_project] += new_points
-    for key_project in uas.PROJECTS:
+    for key_project in uas.ONE_TIME_PROJECTS:
         if key_project not in kd_info_parse["completed_projects"]:
             if new_kd_info["projects_points"][key_project] >= new_kd_info["projects_max_points"][key_project]:
                 new_kd_info["completed_projects"].append(key_project)
                 new_kd_info["projects_assigned"][key_project] = 0
+                new_kd_info["projects_target"][key_project] = 0
                 try:
                     ws = SOCK_HANDLERS[kd_info_parse["kdId"]]
                     ws.send(json.dumps({
@@ -290,6 +308,7 @@ def _kingdom_with_income(
         new_kd_info,
         total_units,
     ))
+    new_kd_info["siphons"] = siphons_in
 
     if new_kd_info["population"] <= 0:
         new_kd_info["status"] = "Dead"
@@ -334,17 +353,18 @@ def _resolve_settles(kd_id, time_update):
         headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
         data=json.dumps(settles_payload),
     )
-    try:
-        ws = SOCK_HANDLERS[kd_id]
-        ws.send(json.dumps({
-            "message": f"Finished settling {ready_settles} stars",
-            "status": "info",
-            "category": "Settles",
-            "delay": 5000,
-            "update": [],
-        }))
-    except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
-        pass
+    if ready_settles:
+        try:
+            ws = SOCK_HANDLERS[kd_id]
+            ws.send(json.dumps({
+                "message": f"Finished settling {ready_settles} stars",
+                "status": "info",
+                "category": "Settles",
+                "delay": 5000,
+                "update": [],
+            }))
+        except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
+            pass
     
     return ready_settles, next_resolve
     
@@ -381,13 +401,14 @@ def _resolve_mobis(kd_id, time_update):
     try:
         ws = SOCK_HANDLERS[kd_id]
         count_mobis = sum(ready_mobis.values())
-        ws.send(json.dumps({
-            "message": f"Finished mobilizing {count_mobis} units",
-            "status": "info",
-            "category": "Mobis",
-            "delay": 5000,
-            "update": [],
-        }))
+        if count_mobis:
+            ws.send(json.dumps({
+                "message": f"Finished mobilizing {count_mobis} units",
+                "status": "info",
+                "category": "Mobis",
+                "delay": 5000,
+                "update": [],
+            }))
     except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
         pass
     
@@ -426,13 +447,14 @@ def _resolve_structures(kd_id, time_update):
     try:
         ws = SOCK_HANDLERS[kd_id]
         count_structures = sum(ready_structures.values())
-        ws.send(json.dumps({
-            "message": f"Finished building {count_structures} structures",
-            "status": "info",
-            "category": "Structures",
-            "delay": 5000,
-            "update": [],
-        }))
+        if count_structures:
+            ws.send(json.dumps({
+                "message": f"Finished building {count_structures} structures",
+                "status": "info",
+                "category": "Structures",
+                "delay": 5000,
+                "update": [],
+            }))
     except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
         pass
     
@@ -469,13 +491,14 @@ def _resolve_missiles(kd_id, time_update):
     try:
         ws = SOCK_HANDLERS[kd_id]
         count_missiles = sum(ready_missiles.values())
-        ws.send(json.dumps({
-            "message": f"Finished building {count_missiles} missiles",
-            "status": "info",
-            "category": "Missiles",
-            "delay": 5000,
-            "update": [],
-        }))
+        if count_missiles:
+            ws.send(json.dumps({
+                "message": f"Finished building {count_missiles} missiles",
+                "status": "info",
+                "category": "Missiles",
+                "delay": 5000,
+                "update": [],
+            }))
     except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
         pass
     
@@ -508,17 +531,18 @@ def _resolve_engineers(kd_id, time_update):
         headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
         data=json.dumps(engineers_payload),
     )
-    try:
-        ws = SOCK_HANDLERS[kd_id]
-        ws.send(json.dumps({
-            "message": f"Finished training {ready_engineers} engineers",
-            "status": "info",
-            "category": "Engineers",
-            "delay": 5000,
-            "update": [],
-        }))
-    except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
-        pass
+    if ready_engineers:
+        try:
+            ws = SOCK_HANDLERS[kd_id]
+            ws.send(json.dumps({
+                "message": f"Finished training {ready_engineers} engineers",
+                "status": "info",
+                "category": "Engineers",
+                "delay": 5000,
+                "update": [],
+            }))
+        except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
+            pass
     
     return ready_engineers, next_resolve
     
@@ -627,13 +651,14 @@ def _resolve_generals(kd_info_parse, time_update):
     try:
         ws = SOCK_HANDLERS[kd_info_parse["kdId"]]
         count_returning_units = sum(returning_units.values())
-        ws.send(json.dumps({
-            "message": f"{returning_generals} generals returned with {count_returning_units} units",
-            "status": "info",
-            "category": "Generals",
-            "delay": 15000,
-            "update": [],
-        }))
+        if count_returning_units:
+            ws.send(json.dumps({
+                "message": f"{returning_generals} generals returned with {count_returning_units} units",
+                "status": "info",
+                "category": "Generals",
+                "delay": 15000,
+                "update": [],
+            }))
     except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
         pass
     return kd_info_parse, next_resolve
@@ -695,15 +720,10 @@ def _resolve_auto_spending(
     if new_settles:
         kd_info_parse["funding"]["settle"] = settle_funding - new_settles * settle_price
         
-        settle_time = (time_update + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_SETTLE_TIME_MULTIPLIER"])).isoformat()
-        next_resolves["settles"] = min(settle_time, kd_info_parse["next_resolve"]["settles"])
+        new_settles_payload, min_settle_time = uab._get_new_settles(kd_info_parse, new_settles, time_update)
+        next_resolves["settles"] = min(min_settle_time, kd_info_parse["next_resolve"]["settles"])
         settle_payload = {
-            "new_settles": [
-                {
-                    "time": settle_time,
-                    "amount": new_settles,
-                }
-            ]
+            "new_settles": new_settles_payload
         }
         settles_patch_response = REQUESTS_SESSION.patch(
             os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/settles',
@@ -741,41 +761,38 @@ def _resolve_auto_spending(
             if (kd_info_parse["structures_target"].get(k, 0) - v) > 0
         }
         total_target_gap = sum(target_gap.values())
-        target_gap_pct = {
-            k: v / total_target_gap
-            for k, v in target_gap.items()
-        }
-        target_structures_to_build = {
-            k: math.floor(v * structures_to_build)
-            for k, v in target_gap_pct.items()
-        }
-        leftover_structures = structures_to_build - sum(target_structures_to_build.values())
-        for _ in range(leftover_structures):
-            rand_structure = _weighted_random_by_dct(target_gap_pct)
-            target_structures_to_build[rand_structure] += 1
-        
-        kd_info_parse["funding"]["structures"] = structures_funding - structures_to_build * structures_price
-        
-        structures_time = (time_update + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_STRUCTURE_TIME_MULTIPLIER"])).isoformat()
-        next_resolves["structures"] = min(structures_time, kd_info_parse["next_resolve"]["structures"])
-        target_structures_to_build_nonzero = {
-            k: v
-            for k, v in target_structures_to_build.items()
-            if v > 0
-        }
-        structures_payload = {
-            "new_structures": [
-                {
-                    "time": structures_time,
-                    **target_structures_to_build_nonzero,
+        if total_target_gap > 0:
+            target_gap_pct = {
+                k: v / total_target_gap
+                for k, v in target_gap.items()
+            }
+            target_structures_to_build = {
+                k: math.floor(v * structures_to_build)
+                for k, v in target_gap_pct.items()
+            }
+            leftover_structures = structures_to_build - sum(target_structures_to_build.values())
+            for _ in range(leftover_structures):
+                rand_structure = _weighted_random_by_dct(target_gap_pct)
+                target_structures_to_build[rand_structure] += 1
+            
+            kd_info_parse["funding"]["structures"] = structures_funding - structures_to_build * structures_price
+            
+            target_structures_to_build_nonzero = {
+                k: v
+                for k, v in target_structures_to_build.items()
+                if v > 0
+            }
+            if sum(target_structures_to_build_nonzero.values()) > 0:
+                new_structures_payload, min_structures_time = uab._get_new_structures(target_structures_to_build_nonzero, time_update)
+                next_resolves["structures"] = min(min_structures_time, kd_info_parse["next_resolve"]["structures"])
+                structures_payload = {
+                    "new_structures": new_structures_payload
                 }
-            ]
-        }
-        structures_patch_response = REQUESTS_SESSION.patch(
-            os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/structures',
-            headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
-            data=json.dumps(structures_payload),
-        )
+                structures_patch_response = REQUESTS_SESSION.patch(
+                    os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/structures',
+                    headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+                    data=json.dumps(structures_payload),
+                )
 
     recruit_price = mobis_info["recruit_price"]
     recruit_time = mobis_info["recruit_time"]
@@ -785,9 +802,13 @@ def _resolve_auto_spending(
     units_desc = mobis_info["units_desc"]
     military_funding = kd_info_parse["funding"]["military"]
 
-    if military_funding > 0 and sum(kd_info_parse["units_target"].values()) > 0:
-        recruits_to_train = min(math.floor(military_funding / recruit_price), max_available_recruits)
-        remaining_funding = military_funding - recruits_to_train * recruit_price
+    if military_funding > 0 and (sum(kd_info_parse["units_target"].values()) > 0 or max_available_recruits > 0):
+        if kd_info_parse["recruits_before_units"]:
+            recruits_til_cap = max(kd_info_parse["max_recruits"] - kd_info_parse["units"]["recruits"] - building_units.get("recruits", 0), 0)
+            recruits_to_train = min(math.floor(military_funding / recruit_price), max_available_recruits, recruits_til_cap)
+            remaining_funding = military_funding - recruits_to_train * recruit_price
+        else:
+            remaining_funding = military_funding
         
         total_units = {
             k: current_units.get(k, 0) + building_units.get(k, 0)
@@ -828,10 +849,14 @@ def _resolve_auto_spending(
             kd_info_parse["units"]["recruits"] = kd_info_parse["units"]["recruits"] - units_to_build
             target_units_to_build[key_unit] = units_to_build
         
+
+        if not kd_info_parse["recruits_before_units"]:
+            recruits_til_cap = max(kd_info_parse["max_recruits"] - kd_info_parse["units"]["recruits"] - building_units.get("recruits", 0), 0)
+            recruits_to_train = min(math.floor(remaining_funding / recruit_price), max_available_recruits, recruits_til_cap)
+            remaining_funding = remaining_funding - recruits_to_train * recruit_price
+
         kd_info_parse["funding"]["military"] = remaining_funding
         
-        recruits_time = (time_update + datetime.timedelta(seconds=recruit_time)).isoformat()
-        mobis_time = (time_update + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_SPECIALIST_TIME_MULTIPLIER"])).isoformat()
         target_units_to_build_nonzero = {
             k: v
             for k, v in target_units_to_build.items()
@@ -841,17 +866,13 @@ def _resolve_auto_spending(
             "new_mobis": []
         }
         if recruits_to_train:
-            mobis_payload["new_mobis"].append({
-                "time": recruits_time,
-                "recruits": recruits_to_train
-            })
-            next_resolves["mobis"] = min(recruits_time, kd_info_parse["next_resolve"]["mobis"])
+            new_recruits, min_recruits_time = uab._get_new_recruits(recruits_to_train, mobis_info["is_conscription"], time_update)
+            mobis_payload["new_mobis"].extend(new_recruits)
+            next_resolves["mobis"] = min(min_recruits_time, kd_info_parse["next_resolve"]["mobis"])
         if sum(target_units_to_build_nonzero.values()) > 0:
-            mobis_payload["new_mobis"].append({
-                "time": mobis_time,
-                **target_units_to_build_nonzero,
-            })
-            kd_info_parse["next_resolve"]["mobis"] = min(mobis_time, kd_info_parse["next_resolve"]["mobis"], next_resolves.get("mobis", uas.DATE_SENTINEL))
+            new_mobis, min_mobis_time = uab._get_new_mobis(target_units_to_build_nonzero, time_update)
+            mobis_payload["new_mobis"].extend(new_mobis)
+            kd_info_parse["next_resolve"]["mobis"] = min(min_mobis_time, kd_info_parse["next_resolve"]["mobis"], next_resolves.get("mobis", uas.DATE_SENTINEL))
         mobis_patch_response = REQUESTS_SESSION.patch(
             os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/mobis',
             headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
@@ -865,15 +886,10 @@ def _resolve_auto_spending(
     if new_engineers:
         kd_info_parse["funding"]["engineers"] = engineers_funding - new_engineers * engineers_price
         
-        engineers_time = (time_update + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_ENGINEER_TIME_MULTIPLIER"])).isoformat()
-        next_resolves["engineers"] = min(engineers_time, kd_info_parse["next_resolve"]["engineers"])
+        new_engineers_payload, min_engineers_time = uab._get_new_engineers(new_engineers, time_update)
+        next_resolves["engineers"] = min(min_engineers_time, kd_info_parse["next_resolve"]["engineers"])
         engineers_payload = {
-            "new_engineers": [
-                {
-                    "time": engineers_time,
-                    "amount": new_engineers,
-                }
-            ]
+            "new_engineers": new_engineers_payload
         }
         engineers_patch_response = REQUESTS_SESSION.patch(
             os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/engineers',
@@ -990,73 +1006,102 @@ def _resolve_auto_projects(kd_info_parse):
         for k, v in pct_assigned.items()
         if (kd_info_parse["projects_target"].get(k, 0) - v) > 0
     }
-    total_target_gap = sum(target_gap.values())
-    target_gap_pct = {
-        k: v / total_target_gap
-        for k, v in target_gap.items()
-    }
-    target_engineers_to_assign = {
-        k: math.floor(v * engineers_to_assign)
-        for k, v in target_gap_pct.items()
-    }
-    leftover_engineers = engineers_to_assign - sum(target_engineers_to_assign.values())
-    highest_gap_pct = max(target_gap_pct, key=target_gap_pct.get)
-    target_engineers_to_assign[highest_gap_pct] += leftover_engineers
-    
-    new_projects_assigned = kd_info_parse["projects_assigned"]
-    for key_project, value_engineers in target_engineers_to_assign.items():
-        kd_info_parse["projects_assigned"][key_project] += value_engineers
+    if target_gap:
+        total_target_gap = sum(target_gap.values())
+        target_gap_pct = {
+            k: v / total_target_gap
+            for k, v in target_gap.items()
+        }
+        target_engineers_to_assign = {
+            k: math.floor(v * engineers_to_assign)
+            for k, v in target_gap_pct.items()
+        }
+        leftover_engineers = engineers_to_assign - sum(target_engineers_to_assign.values())
+        highest_gap_pct = max(target_gap_pct, key=target_gap_pct.get)
+        target_engineers_to_assign[highest_gap_pct] += leftover_engineers
+        
+        new_projects_assigned = kd_info_parse["projects_assigned"]
+        for key_project, value_engineers in target_engineers_to_assign.items():
+            kd_info_parse["projects_assigned"][key_project] += value_engineers
     return kd_info_parse
 
 def _resolve_schedule_attack(new_kd_info, schedule):
-    pure_pct = schedule["options"].get("pure_offense", 0)
-    flex_pct = schedule["options"].get("flex_offense", 0)
 
     req = {
         "attackerValues": {
             "generals": schedule["options"].get("generals", 0)
         }
     }
-    total_units = new_kd_info["units"].copy()
-    total_general_units = {
-        k: 0
-        for k in uas.UNITS
-    }
-    for general_units in new_kd_info["generals_out"]:
-        for key_unit, value_unit in general_units.items():
-            if key_unit == "return_time":
-                continue
-            total_units[key_unit] += value_unit
-            total_general_units[key_unit] += value_unit
-
-    pct_units_out = {
-        k: v / max(total_units.get(k), 1)
-        for k, v in total_general_units.items()
-    }
-    pct_units_available_pure = {
-        k: max(pure_pct - v, 0)
-        for k, v in pct_units_out.items()
-    }
-    pct_units_available_flex = {
-        k: max(flex_pct - v, 0)
-        for k, v in pct_units_out.items()
-    }
-    
-    for key_unit, value_unit in new_kd_info["units"].items():
-        if uas.UNITS[key_unit].get("offense", 0) == 0:
-            continue
-        else:
-            if uas.UNITS[key_unit].get("defense", 0) == 0:
-                req["attackerValues"][key_unit] = min(
-                    math.floor(pct_units_available_pure[key_unit] * total_units.get(key_unit, 0)),
-                    value_unit,
-                )
+    prefer_autofill = schedule["options"].get("prefer_autofill", False)
+    target_kd = schedule["options"]["target"]
+    use_autofill = False
+    if prefer_autofill:
+        revealed = uag._get_revealed(new_kd_info["kdId"])
+        if "military" in revealed["revealed"].get(target_kd, {}).keys():
+            use_autofill = True
+            autofill_req = {
+                "defenderValues": {
+                    **{
+                        key_unit: 0
+                        for key_unit in uas.UNITS.keys()
+                    },
+                    "military_bonus": 25,
+                    "shields": 10,
+                },
+                "buffer": schedule["options"].get("autofill_buffer", 0.01) * 100,
+                "generals": schedule["options"].get("generals", 0),
+            }
+            autofill_payload, _ = uac._autofill_attack(autofill_req, new_kd_info["kdId"], target_kd)
+            if autofill_payload["attacker_offense"] > autofill_payload["defender_defense"]:
+                for key_unit, value_unit in autofill_payload["attacker_units"].items():
+                    req["attackerValues"][key_unit] = value_unit
             else:
-                req["attackerValues"][key_unit] = min(
-                    math.floor(pct_units_available_flex[key_unit] * total_units.get(key_unit, 0)),
-                    value_unit,
-                )
-    new_kd_info, payload, status_code = uac._attack(req, new_kd_info["kdId"], schedule["options"]["target"])
+                return new_kd_info
+    
+    if not prefer_autofill or not use_autofill:
+        pure_pct = schedule["options"].get("pure_offense", 0)
+        flex_pct = schedule["options"].get("flex_offense", 0)
+
+        total_units = new_kd_info["units"].copy()
+        total_general_units = {
+            k: 0
+            for k in uas.UNITS
+        }
+        for general_units in new_kd_info["generals_out"]:
+            for key_unit, value_unit in general_units.items():
+                if key_unit == "return_time":
+                    continue
+                total_units[key_unit] += value_unit
+                total_general_units[key_unit] += value_unit
+
+        pct_units_out = {
+            k: v / max(total_units.get(k), 1)
+            for k, v in total_general_units.items()
+        }
+        pct_units_available_pure = {
+            k: max(pure_pct - v, 0)
+            for k, v in pct_units_out.items()
+        }
+        pct_units_available_flex = {
+            k: max(flex_pct - v, 0)
+            for k, v in pct_units_out.items()
+        }
+        
+        for key_unit, value_unit in new_kd_info["units"].items():
+            if uas.UNITS[key_unit].get("offense", 0) == 0:
+                continue
+            else:
+                if uas.UNITS[key_unit].get("defense", 0) == 0:
+                    req["attackerValues"][key_unit] = min(
+                        math.floor(pct_units_available_pure[key_unit] * total_units.get(key_unit, 0)),
+                        value_unit,
+                    )
+                else:
+                    req["attackerValues"][key_unit] = min(
+                        math.floor(pct_units_available_flex[key_unit] * total_units.get(key_unit, 0)),
+                        value_unit,
+                    )
+    new_kd_info, payload, status_code = uac._attack(req, new_kd_info["kdId"], target_kd)
     return new_kd_info
 
 def _resolve_schedule_attackprimitives(new_kd_info, schedule):
@@ -1185,7 +1230,8 @@ def _resolve_schedules(new_kd_info, time_update):
         "aggressivespy": _resolve_schedule_aggressivespy,
         "missiles": _resolve_schedule_missiles,
     }
-    for ready_sched in ready_schedules:
+    intel_first_schedules = sorted(ready_schedules, key=lambda x: -int(x.get("type", "") == "intelspy"))
+    for ready_sched in intel_first_schedules:
         new_kd_info = handler_funcs[ready_sched["type"]](new_kd_info, ready_sched)
 
     new_kd_info["schedule"] = keep_schedules
@@ -1293,6 +1339,11 @@ def _resolve_scores(kd_scores, time_update):
         except KeyError:
             new_scores["points"][kd_scoring] = epoch_points
 
+    galaxies_inverted, _ = uag._get_galaxies_inverted()
+    new_scores["galaxy_networth"] = collections.defaultdict(int)
+    for kd_id, networth in kd_scores["networth"].items():
+        galaxy = galaxies_inverted[kd_id]
+        new_scores["galaxy_networth"][galaxy] += networth
     
     update_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/scores',
@@ -1300,12 +1351,133 @@ def _resolve_scores(kd_scores, time_update):
         data=json.dumps(new_scores)
     )
 
+def _update_history(
+    kd_info,
+    time_update,
+):
+    history_payload = {}
+
+    basic_kd_info_keys = ["networth", "stars", "drones", "population"]
+    for key_info in basic_kd_info_keys:
+        history_payload[key_info] = {
+            "time": time_update.isoformat(),
+            "value": kd_info[key_info],
+        }
+    history_payload["engineers"] = {
+        "time": time_update.isoformat(),
+        "value": kd_info["units"]["engineers"],
+    }
+    
+    total_units = kd_info["units"].copy()
+    total_general_units = {
+        k: 0
+        for k in uas.UNITS
+    }
+    for general_units in kd_info["generals_out"]:
+        for key_unit, value_unit in general_units.items():
+            if key_unit == "return_time":
+                continue
+            total_units[key_unit] += value_unit
+            total_general_units[key_unit] += value_unit
+    
+    offense = uag._calc_max_offense(total_units)
+    defense = uag._calc_max_defense(total_units)
+
+    history_payload["max_offense"] = {
+        "time": time_update.isoformat(),
+        "value": offense,
+    }
+    history_payload["max_defense"] = {
+        "time": time_update.isoformat(),
+        "value": defense,
+    }
+    update_response = REQUESTS_SESSION.patch(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_info["kdId"]}/history',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+        data=json.dumps({"history": history_payload})
+    )
+
+def _resolve_empires(
+    kd_scores,
+    time_update,
+):
+    empires_inverted, empires_info, _, _ = uag._get_empires_inverted()
+    time_last_update = datetime.datetime.fromisoformat(empires_info["last_update"]).astimezone(datetime.timezone.utc)
+    seconds_elapsed = (time_update - time_last_update).total_seconds()
+    epoch_elapsed = seconds_elapsed / uas.GAME_CONFIG["BASE_EPOCH_SECONDS"]
+
+    kd_counts = collections.defaultdict(int)
+    for kd_id in kd_scores["networth"].keys():
+        kd_empire = empires_inverted.get(kd_id)
+        if kd_empire:
+            kd_counts[kd_empire] += 1
+    
+    for empire_id in empires_info["empires"].keys():
+        empires_info["empires"][empire_id]["num_kingdoms"] = kd_counts.get(empire_id, 0)
+        empires_info["empires"][empire_id]["aggression_max"] = empires_info["empires"][empire_id]["num_kingdoms"] * uas.GAME_CONFIG["AGGRO_METER_PER_KD"]
+
+        decay_per_epoch = empires_info["empires"][empire_id]["num_kingdoms"] * uas.GAME_CONFIG["AGGRO_METER_DECAY_PER_KD_PER_EPOCH"]
+        decay = decay_per_epoch * epoch_elapsed
+
+        if empires_info["empires"][empire_id]["denounced"]:
+            denounce_expiration = datetime.datetime.fromisoformat(empires_info["empires"][empire_id]["denounced_expires"]).astimezone(datetime.timezone.utc)
+            if denounce_expiration < time_update:
+                empires_info["empires"][empire_id]["denounced"] = ""
+                empires_info["empires"][empire_id]["denounced_expires"] = ""
+
+        if empires_info["empires"][empire_id]["surprise_war_penalty"]:
+            denounce_expiration = datetime.datetime.fromisoformat(empires_info["empires"][empire_id]["surprise_war_penalty_expires"]).astimezone(datetime.timezone.utc)
+            if denounce_expiration < time_update:
+                empires_info["empires"][empire_id]["surprise_war_penalty"] = False
+                empires_info["empires"][empire_id]["surprise_war_penalty_expires"] = ""
+
+        new_peace = {
+            empire_id: peace_expiration
+            for empire_id, peace_expiration in empires_info["empires"][empire_id]["peace"].items()
+            if datetime.datetime.fromisoformat(peace_expiration).astimezone(datetime.timezone.utc) > time_update
+        }
+        empires_info["empires"][empire_id]["peace"] = new_peace
+
+        for other_empire_id, aggression_meter in empires_info["empires"][empire_id]["aggression"].items():
+            if aggression_meter > empires_info["empires"][empire_id]["aggression_max"]:
+                if other_empire_id not in empires_info["empires"][empire_id]["war"]:
+                    empires_info["empires"][empire_id]["war"].append(other_empire_id)
+                    empires_info["empires"][other_empire_id]["war"].append(empire_id)
+
+                    news_payload = {
+                        "news": {
+                            "time": time_update.isoformat(),
+                            "news": f"{empires_info['empires'][empire_id]['name']} declared war by aggression on {empires_info['empires'][other_empire_id]['name']}",
+                        }
+                    }
+                    universe_news_update_response = REQUESTS_SESSION.patch(
+                        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/universenews',
+                        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+                        data=json.dumps(news_payload)
+                    )
+        for other_empire_id in empires_info["empires"][empire_id]["aggression"]:
+            empires_info["empires"][empire_id]["aggression"][other_empire_id] = max(
+                empires_info["empires"][empire_id]["aggression"][other_empire_id] - decay,
+                0,
+            )
+    empires_payload = {
+        "empires": empires_info["empires"],
+        "last_update": time_update.isoformat(),
+    }
+
+    update_response = REQUESTS_SESSION.patch(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/empires',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+        data=json.dumps(empires_payload)
+    )
+
+
 
 @app.route('/api/refreshdata')
 def refresh_data():
     """Perform periodic refresh tasks"""
     headers = flask.request.headers
-    if headers.get("Refresh-Secret", "") != "domnusrefresh":
+    if headers.get("Refresh-Secret", "") != os.environ["REFRESH_SECRET"]:
         return ("Not Authorized", 401)
     
     state = uag._get_state()
@@ -1319,6 +1491,22 @@ def refresh_data():
 
     kingdoms = uag._get_kingdoms()
     time_update = datetime.datetime.now(datetime.timezone.utc)
+
+    history_datetime = datetime.datetime.fromisoformat(state["state"]["next_history"]).astimezone(datetime.timezone.utc)
+    if history_datetime < time_update:
+        update_history = True
+        next_history = history_datetime + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"])
+        state_payload = {
+            "next_history": next_history.isoformat(),
+        }
+
+        update_response = REQUESTS_SESSION.patch(
+            os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/updatestate',
+            headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+            data=json.dumps(state_payload)
+        )
+    else:
+        update_history = False
 
     kd_scores = {
         "stars": {},
@@ -1410,12 +1598,16 @@ def refresh_data():
                 time_update,
                 current_bonuses,
             )
-            next_resolves = {
+            next_resolves_spending_effective = {
                 k: min(
                     datetime.datetime.fromisoformat(v).astimezone(datetime.timezone.utc),
                     next_resolves.get(k, datetime.datetime.fromisoformat(uas.DATE_SENTINEL).astimezone(datetime.timezone.utc))
                 )
                 for k, v in next_resolves_auto_spending.items()
+            }
+            next_resolves = {
+                **next_resolves,
+                **next_resolves_spending_effective,
             }
         if kd_info_parse["auto_assign_projects"] and (kd_info_parse["units"]["engineers"] - sum(kd_info_parse["projects_assigned"].values()) > 0):
             kd_info_parse = _resolve_auto_projects(kd_info_parse)
@@ -1436,7 +1628,14 @@ def refresh_data():
 
         kd_scores["stars"][kd_id] = new_kd_info["stars"]
         kd_scores["networth"][kd_id] = new_kd_info["networth"]
+
+        if update_history:
+            _update_history(
+                new_kd_info,
+                time_update,
+            )
     
     _resolve_scores(kd_scores, time_update)
+    _resolve_empires(kd_scores, time_update)
         
     return "Refreshed", 200

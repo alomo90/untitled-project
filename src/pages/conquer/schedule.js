@@ -54,6 +54,8 @@ function getCurrentHour() {
 
 const initialScheduleOptions = {
     "attack": {
+        "prefer_autofill": true,
+        "autofill_buffer": 1.0,
         "target": null,
         "pure_offense": 0.0,
         "flex_offense": 0.0,
@@ -199,6 +201,35 @@ function Add(props) {
                     </thead>
                     <tbody>
                         <tr>
+                            <td>Prefer Autofill?</td>
+                            <td>
+                                <Form.Check
+                                    id="prefer-autofill-input"
+                                    name="prefer_autofill"
+                                    onChange={(e) => handleOptionChangeExplicit("prefer_autofill", e.target.checked)}
+                                    defaultChecked={options.prefer_autofill || true}
+                                    autoComplete="off"
+                                />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Autofill Buffer</td>
+                            <td>
+                                <InputGroup className="mb-3 unit-input-group">
+                                    <Form.Control
+                                        className="unit-form"
+                                        id="autofill-buffer-input"
+                                        name="autofill_buffer"
+                                        onChange={handleOptionChange}
+                                        value={options.autofill_buffer || ""} 
+                                        placeholder="1.0"
+                                        autoComplete="off"
+                                    />
+                                    <InputGroup.Text id="basic-addon2" className="unit-input-group-text">%</InputGroup.Text>
+                                </InputGroup>
+                            </td>
+                        </tr>
+                        <tr>
                             <td>Pure Offense</td>
                             <td>
                                 <InputGroup className="mb-3 unit-input-group">
@@ -334,8 +365,8 @@ function Add(props) {
             })
             const selectedKingdomOption = (options.target != null) ? kingdomOptions.filter(selectOption => selectOption.value == options.target)[0] : null;
             const spyOptions = [
-                {value: "spykingdom", "label": "Spy on Kingdom"},
                 {value: "spymilitary", "label": "Spy on Military"},
+                {value: "spykingdom", "label": "Spy on Kingdom"},
                 {value: "spyshields", "label": "Spy on Shields"},
                 {value: "spyprojects", "label": "Spy on Projects"},
                 {value: "spystructures", "label": "Spy on Structures"},
@@ -395,6 +426,7 @@ function Add(props) {
                         value={selectedOperationOption}
                         onChange={(selected) => handleOptionChangeExplicit("operation", selected.value)}
                         autoFocus={false} 
+                        isSearchable={false}
                         styles={{
                             control: (baseStyles, state) => ({
                                 ...baseStyles,
@@ -566,6 +598,7 @@ function Add(props) {
                         value={selectedOperationOption}
                         onChange={(selected) => handleOptionChangeExplicit("operation", selected.value)}
                         autoFocus={false} 
+                        isSearchable={false}
                         styles={{
                             control: (baseStyles, state) => ({
                                 ...baseStyles,
@@ -771,7 +804,6 @@ function Add(props) {
             </>
         }
     }
-    
     const toasts = results.map((result, index) =>
         <Toast
             key={index}
@@ -800,6 +832,7 @@ function Add(props) {
                     options={scheduleOptions}
                     onChange={handleScheduleChange}
                     autoFocus={true}
+                    isSearchable={false}
                     // defaultValue={kingdomOptions.filter(option => option.value === props.initialKd)} 
                     styles={{
                         control: (baseStyles, state) => ({
@@ -882,6 +915,9 @@ function Queue(props) {
         "max_tries": "Max Tries",
         "share_to_galaxy": "Share to Galaxy",
         "repeat": "Repeat",
+        "prefer_autofill": "Prefer Autofill",
+        "autofill_buffer": "Autofill Buffer",
+        "attempts": "Attempts",
     }
     const displayPercent = (percent) => `${(percent * 100).toFixed(1)}%`;
     const kdFullLabel = (kdId) => {
@@ -897,7 +933,7 @@ function Queue(props) {
             var prettyValue;
             if (optionKey == "target") {
                 prettyValue = kdFullLabel(queueItem.options[optionKey])
-            } else if (["drones_pct", "pure_offense", "flex_offense"].includes(optionKey)) {
+            } else if (["drones_pct", "pure_offense", "flex_offense", "autofill_buffer"].includes(optionKey)) {
                 prettyValue = displayPercent(queueItem.options[optionKey])
             } else {
                 prettyValue = (prettyNames[queueItem.options[optionKey]] || queueItem.options[optionKey]).toString()

@@ -26,9 +26,45 @@ import 'bootstrap/dist/css/bootstrap.css';
 import HelpButton from "../../components/helpbutton";
 
 
+
+const getNotifsCount = (notifs, categories) => {
+    var total = 0;
+    for (const category of categories) {
+      total += parseInt(notifs[category]);
+    }
+    return total;
+  }
+  
+const getNotifsSuffix = (notifs, categories) => {
+    const count = getNotifsCount(notifs, categories);
+    if (count > 0) {
+      return ` (${count})`
+    } else {
+      return ""
+    }
+}
+  
+  
 function ConquerContent(props) {
     const [key, setKey] = useState('kingdom');
 
+    const clearNotifs = (categories) => {
+        const updateFunc = () => {
+            authFetch("api/clearnotifs", {
+                method: "POST",
+                body: JSON.stringify({"categories": categories})
+            });
+        }
+        props.updateData(['notifs'], [updateFunc])
+    }
+    const handleNotifsSelect = (eventKey) => {
+        if (eventKey === "shared") {
+            if (props.data.notifs.shared > 0) {
+                clearNotifs(["shared"])
+            }
+        }
+        setKey(eventKey);
+    }
     return (
     <>
         <Header data={props.data} />
@@ -38,6 +74,7 @@ function ConquerContent(props) {
         justify
         fill
         variant="tabs"
+        onSelect={(k) => handleNotifsSelect(k)}
       >
         <Tab eventKey="revealed" title="Revealed">
           <Revealed
@@ -52,7 +89,7 @@ function ConquerContent(props) {
             data={props.data}
             />
         </Tab>
-        <Tab eventKey="shared" title="Shared">
+        <Tab eventKey="shared"title={`Shared${getNotifsSuffix(props.data.notifs, ["shared"])}`}>
           <Shared
             revealed={props.data.revealed}
             kingdoms={props.data.kingdoms}
@@ -88,7 +125,7 @@ function getTimeString(date) {
     if (date === undefined) {
         return "--"
     }
-    const hours = Math.abs(Date.parse(date) - Date.now()) / 3.6e6;
+    const hours = Math.max((Date.parse(date) - Date.now()), 0) / 3.6e6;
     var n = new Date(0, 0);
     n.setSeconds(+hours * 60 * 60);
     return n.toTimeString().slice(0, 8);

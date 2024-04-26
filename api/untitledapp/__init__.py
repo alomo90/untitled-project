@@ -113,6 +113,16 @@ def start_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def before_start_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        state = uag._get_state()
+        time_now = datetime.datetime.now(datetime.timezone.utc)
+        if time_now.isoformat() > state["state"]["game_start"]:
+            return flask.jsonify({"message": "The game has already started!"}), 400
+        return f(*args, **kwargs)
+    return decorated_function
+
 def _mark_kingdom_death(kd_id):
     query = db.session.query(User).filter_by(kd_id=kd_id).all()
     user = query[0]
@@ -131,6 +141,49 @@ def _mark_kingdom_death(kd_id):
     except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
         pass
     return flask.jsonify(str(user.__dict__))
+
+def _add_notifs(kd_id, categories):
+    add_notifs_response = REQUESTS_SESSION.patch(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/notifs',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+        data=json.dumps({"add_categories": categories}),
+    )
+
+def _clear_notifs(kd_id, categories):
+    clear_notifs_response = REQUESTS_SESSION.patch(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/notifs',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+        data=json.dumps({"clear_categories": categories}),
+    )
+
+def _get_notifs(kd_id):
+    get_notifs_response = REQUESTS_SESSION.get(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/notifs',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+    )
+    get_notifs_response_json = json.loads(get_notifs_response.text)
+    return get_notifs_response_json
+
+
+@app.route('/api/notifs', methods=['GET'])
+@flask_praetorian.auth_required
+def get_notifs():
+    kd_id = flask_praetorian.current_user().kd_id
+    notifs = _get_notifs(kd_id)
+    return flask.jsonify(notifs), 200
+
+
+@app.route('/api/clearnotifs', methods=['POST'])
+@flask_praetorian.auth_required
+def clear_notifs():
+    kd_id = flask_praetorian.current_user().kd_id
+    req = flask.request.get_json(force=True)
+
+    categories = req.get("categories", [])
+    if categories:
+        _clear_notifs(kd_id, categories)
+    
+    return "Cleared", 200
 
 
 import untitledapp.account as uaa
@@ -186,6 +239,7 @@ with app.app_context():
           kd_created=True,
 		))
     db.session.commit()
+
 @app.route('/api/resetstate', methods=["POST"])
 @flask_praetorian.roles_required('admin')
 def reset_state():
@@ -228,6 +282,16 @@ def update_state():
             headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
             data=json.dumps({
                 "item": "scores",
+                "state": {
+                    "last_update": req["game_start"]
+                },
+            }),
+        )        
+        create_response = REQUESTS_SESSION.post(
+            os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/createitem',
+            headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+            data=json.dumps({
+                "item": "empires",
                 "state": {
                     "last_update": req["game_start"]
                 },
@@ -320,11 +384,11 @@ def create_initial_kingdom():
     user = flask_praetorian.current_user()
 
     if user.kd_id != "" and user.kd_id != None:
-        return (flask.jsonify("You already have a kingdom ID"), 400)
+        return (flask.jsonify({"message": "You already have a kingdom ID"}), 400)
 
     valid_name, message = _validate_kingdom_name(req["kdName"])
     if not valid_name:
-        return (flask.jsonify(message), 400)
+        return (flask.jsonify({"message": message}), 400)
     
     galaxies = uag._get_galaxy_info()
     size_galaxies = collections.defaultdict(list)
@@ -341,7 +405,7 @@ def create_initial_kingdom():
         data=json.dumps({"kingdom_name": req["kdName"], "galaxy": chosen_galaxy}),
     )
     if create_kd_response.status_code != 201:
-        return (flask.jsonify("Error creating kingdom"), 400)
+        return (flask.jsonify({"message": "Error creating kingdom"}), 400)
     
     kd_id = create_kd_response.text
 
@@ -365,7 +429,37 @@ def create_initial_kingdom():
     db.session.commit()
     uaa._update_accounts()
     
-    return kd_id, 200
+    return flask.jsonify({"message": ""}), 200
+
+
+@app.route('/api/resetkingdom', methods=["POST"])
+@flask_praetorian.auth_required
+@before_start_required
+# @flask_praetorian.roles_required('verified')
+def reset_initial_kingdom():    
+    user = flask_praetorian.current_user()
+    kd_id = user.kd_id
+    kd_info = uag._get_kd_info(kd_id)
+    for table, initial_state in uas.INITIAL_KINGDOM_STATE.items():
+        item_id = f"{table}_{kd_id}"
+        state = initial_state.copy()
+        if table == "kingdom":
+            state["kdId"] = kd_id
+            state["name"] = kd_info["name"]
+
+        create_response = REQUESTS_SESSION.post(
+            os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/createitem',
+            headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+            data=json.dumps({
+                "item": item_id,
+                "state": state,
+            }),
+        )
+        
+    user.kd_created = False
+    db.session.commit()
+    uaa._update_accounts()
+    return (flask.jsonify("Reset kingdom"), 200)
 
 @app.route('/api/createkingdomdata')
 @flask_praetorian.auth_required
@@ -384,7 +478,8 @@ def create_kingdom_data():
 
 def _validate_kingdom_choices(
     unit_choices,
-    structures_choices,    
+    structures_choices,
+    race,
 ):
     sum_units_points = sum([
         value_unit * uas.KINGDOM_CREATOR_POINTS[key_unit]
@@ -408,6 +503,9 @@ def _validate_kingdom_choices(
     if sum_structures != uas.INITIAL_KINGDOM_STATE["kingdom"]["stars"]:
         return False, "You must use all stars for structures"
     
+    if race not in uas.RACES:
+        return False, "You must select a valid race"
+    
     return True, ""
 
 @app.route('/api/createkingdomchoices', methods=["POST"])
@@ -418,7 +516,7 @@ def create_kingdom_choices():
     user = flask_praetorian.current_user()
 
     if user.kd_created:
-        return (flask.jsonify("This kingdom has already been created"), 400)
+        return (flask.jsonify({"message": "This kingdom has already been created"}), 400)
 
     unit_choices = {
         k: int(v or 0)
@@ -428,10 +526,11 @@ def create_kingdom_choices():
         k: int(v or 0)
         for k, v in req["structuresChoices"].items()
     }
+    race = req["race"]
 
-    valid_kd, message = _validate_kingdom_choices(unit_choices, structures_choices)
+    valid_kd, message = _validate_kingdom_choices(unit_choices, structures_choices, race)
     if not valid_kd:
-        return (flask.jsonify(message), 400)
+        return (flask.jsonify({"message": message}), 400)
     
     kd_id = user.kd_id
     kd_info = uag._get_kd_info(kd_id)
@@ -448,11 +547,15 @@ def create_kingdom_choices():
         for k, v in kd_info["structures"].items()
     }
     state = uag._get_state()
+    start_time_datetime = datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
     payload["last_income"] = max(state["state"]["game_start"], datetime.datetime.now(datetime.timezone.utc).isoformat())
     payload["next_resolve"] = kd_info["next_resolve"]
     payload["next_resolve"]["spy_attempt"] = (
-        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_SPY_ATTEMPT_TIME_MULTIPLIER"])
+        max(datetime.datetime.now(datetime.timezone.utc), start_time_datetime)
+        + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_SPY_ATTEMPT_TIME_MULTIPLIER"])
     ).isoformat()
+    payload["coordinate"] = random.randint(0, 99)
+    payload["race"] = race
 
     patch_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}',
@@ -464,7 +567,7 @@ def create_kingdom_choices():
     db.session.commit()
     uaa._update_accounts()
     
-    return (flask.jsonify("Success"), 200)
+    return (flask.jsonify({"message": ""}), 200)
 
 def _validate_shields(req_values):
 
@@ -488,9 +591,9 @@ def _validate_shields(req_values):
 def set_shields():
     req = flask.request.get_json(force=True)
     req_values = {
-        k: int(v or 0) / 100
+        k: float(v or 0) / 100
         for k, v in req.items()
-        if int(v or 0)
+        if v != ""
     }
     valid_shields, error_message = _validate_shields(req_values)
     if not valid_shields:
@@ -519,10 +622,13 @@ def set_shields():
 
 @app.route('/api/messages/<target_kd>', methods=['POST'])
 @flask_praetorian.auth_required
+@alive_required
 # @flask_praetorian.roles_required('verified')
 def send_message(target_kd):
     kd_id = flask_praetorian.current_user().kd_id
     req = flask.request.get_json(force=True)
+
+    kingdoms = uag._get_kingdoms()
 
     if len(req.get("message", "")) > 1024:
         return flask.jsonify({"message": "Messages must be less than 1024 characters"}), 400
@@ -551,6 +657,18 @@ def send_message(target_kd):
         headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
         data=json.dumps(payload_to)
     )
+    _add_notifs(target_kd, ["messages"])
+    try:
+        ws = SOCK_HANDLERS[target_kd]
+        ws.send(json.dumps({
+            "message": f"New message from {kingdoms[kd_id]}!",
+            "status": "info",
+            "category": "Message",
+            "delay": 30000,
+            "update": ["messages"],
+        }))
+    except (KeyError, ConnectionError, StopIteration, ConnectionClosed):
+        pass
     
     return (flask.jsonify({"message": "Message sent!", "status": "success"}), 200)
 
@@ -699,7 +817,8 @@ def unshare_kd(share_to):
         data=json.dumps(share_to_payload),
     )
     return (flask.jsonify(kd_response.text)), 200
-    
+
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):

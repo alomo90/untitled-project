@@ -52,7 +52,10 @@ def get_state():
         "primitives_defense_per_star": primitives_defense_per_star,
         "primitives_rob_per_drone": primitives_rob_per_drone,
         "aggro_operations": uas.AGGRO_OPERATIONS,
+        "reveal_operations": uas.REVEAL_OPERATIONS,
         "game_config": uas.GAME_CONFIG,
+        "races": uas.RACES,
+        "surrender_options": uas.SURRENDER_OPTIONS,
     }), 200
 
 def _get_scores():
@@ -64,7 +67,7 @@ def _get_scores():
     return get_response_json
 
 
-def _get_scores_redacted(revealed, kd_id):
+def _get_scores_redacted(revealed, kd_id, galaxies_inverted):
     scores = _get_scores()
 
     top_nw = sorted(scores["networth"].items(), key=lambda item: -item[1])
@@ -75,30 +78,33 @@ def _get_scores_redacted(revealed, kd_id):
     top_stars_redacted = []
     top_points_redacted = []
     for item in top_nw:
-        if "stats" in revealed["revealed"].get(item[0], {}) or item[0] == kd_id:
+        if "stats" in revealed["revealed"].get(item[0], {}) or item[0] == kd_id or galaxies_inverted[item[0]] == galaxies_inverted[kd_id]:
             top_nw_redacted.append(item)
         else:
             top_nw_redacted.append(
                 ("", item[1])
             )
     for item in top_stars:
-        if "stats" in revealed["revealed"].get(item[0], {}) or item[0] == kd_id:
+        if "stats" in revealed["revealed"].get(item[0], {}) or item[0] == kd_id or galaxies_inverted[item[0]] == galaxies_inverted[kd_id]:
             top_stars_redacted.append(item)
         else:
             top_stars_redacted.append(
                 ("", item[1])
             )
     for item in top_points:
-        if item[0] == kd_id:
+        if item[0] == kd_id or galaxies_inverted[item[0]] == galaxies_inverted[kd_id]:
             top_points_redacted.append(item)
         else:
             top_points_redacted.append(
                 ("", item[1])
             )
+        
+    top_galaxy_networth = sorted(scores["galaxy_networth"].items(), key=lambda x: -x[1])
     payload = {
         "networth": top_nw_redacted,
         "stars": top_stars_redacted,
-        "points": top_points_redacted
+        "points": top_points_redacted,
+        "galaxy_networth": top_galaxy_networth,
     }
     return payload
 
@@ -109,7 +115,8 @@ def get_scores():
     
     kd_id = flask_praetorian.current_user().kd_id
     revealed = _get_revealed(kd_id)
-    scores_redacted = _get_scores_redacted(revealed, kd_id)
+    galaxies_inverted, _ = _get_galaxies_inverted()
+    scores_redacted = _get_scores_redacted(revealed, kd_id, galaxies_inverted)
     return flask.jsonify(scores_redacted), 200
 
 @app.route('/api/kingdomid')
@@ -250,7 +257,7 @@ def _get_empire_info():
     )
     empire_info_parse = json.loads(empire_info.text)
     
-    return empire_info_parse["empires"]
+    return empire_info_parse
 
 
 def _get_empires_inverted():
@@ -259,7 +266,7 @@ def _get_empires_inverted():
 
     galaxy_empires = {}
     empires_inverted = {}
-    for empire_id, empire_info in empire_infos.items():
+    for empire_id, empire_info in empire_infos["empires"].items():
         for galaxy in empire_info["galaxies"]:
             galaxy_empires[galaxy] = empire_id
             galaxy_kds = galaxy_info[galaxy]
@@ -272,7 +279,7 @@ def _get_empires_inverted():
 # @flask_praetorian.roles_required('verified')
 def empires():
     empires = _get_empire_info()
-    return (flask.jsonify(empires), 200)
+    return (flask.jsonify(empires["empires"]), 200)
 
 @app.route('/api/empires_inverted')
 @flask_praetorian.auth_required
@@ -285,7 +292,27 @@ def empires_inverted():
     }
     return (flask.jsonify(payload), 200)
 
+def _get_empire_politics(empire_id):
+    empire_politics = REQUESTS_SESSION.get(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/empire/{empire_id}/politics',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']}
+    )
+    empire_politics_parse = json.loads(empire_politics.text)
+    
+    return empire_politics_parse
 
+@app.route('/api/empirepolitics')
+@flask_praetorian.auth_required
+# @flask_praetorian.roles_required('verified')
+def empire_politics():
+    kd_id = flask_praetorian.current_user().kd_id
+    empires_inverted, _, _, _ = _get_empires_inverted()
+    kd_empire = empires_inverted.get(kd_id)
+    if not kd_empire:
+        return flask.jsonify({}), 200
+    
+    empire_politics = _get_empire_politics(kd_empire)
+    return (flask.jsonify(empire_politics), 200)
 
 @app.route('/api/galaxynews')
 @flask_praetorian.auth_required
@@ -430,13 +457,37 @@ def _calc_max_offense(
     other_bonuses=0.0,
     generals=4,
     fuelless=False,
+    lumina=False,
+    denounced=False,
+    war=False,
+    surprise_war_penalty=False,
 ):
     int_fuelless = int(fuelless)
+    int_lumina = int(lumina)
+    if war:
+        int_denounced = 0
+    else:
+        int_denounced = int(denounced)
+    int_war = int(war)
+    if war:
+        int_surprise_war_penalty = 0
+    else:
+        int_surprise_war_penalty = int(surprise_war_penalty)
     raw_attack = sum([
         stat_map["offense"] * unit_dict.get(key, 0)
         for key, stat_map in uas.UNITS.items() 
     ])
-    attack_w_bonuses = raw_attack * (1 + uas.GAME_FUNCS["BASE_GENERALS_BONUS"](generals) + military_bonus + other_bonuses - (int_fuelless * uas.GAME_CONFIG["BASE_FUELLESS_STRENGTH_REDUCTION"]))
+    attack_w_bonuses = raw_attack * (
+        1
+        + uas.GAME_FUNCS["BASE_GENERALS_BONUS"](generals)
+        + military_bonus
+        + other_bonuses
+        - (int_fuelless * uas.GAME_CONFIG["BASE_FUELLESS_STRENGTH_REDUCTION"])
+        - (int_lumina * uas.GAME_CONFIG["LUMINA_OFFENSE_REDUCTION"])
+        + (int_denounced * uas.GAME_CONFIG["DENOUNCE_OFFENSE_BONUS"])
+        + (int_war * uas.GAME_CONFIG["WAR_OFFENSE_INCREASE"])
+        + (int_surprise_war_penalty * uas.GAME_CONFIG["SURPRISE_WAR_PENALTY_OFFENSE_INCREASE"])
+    )
     return math.floor(attack_w_bonuses)
 
 def _calc_max_defense(
@@ -445,26 +496,39 @@ def _calc_max_defense(
     other_bonuses=0.0,
     shields=0.10,
     fuelless=False,
+    gaian=False,
+    peace=False
 ):
 
     int_fuelless = int(fuelless)
+    int_gaian = int(gaian)
+    int_peace = int(peace)
     raw_defense = sum([
         stat_map["defense"] * unit_dict.get(key, 0)
         for key, stat_map in uas.UNITS.items() 
     ])
-    defense_w_bonuses = raw_defense * (1 + shields + military_bonus + other_bonuses - (int_fuelless * uas.GAME_CONFIG["BASE_FUELLESS_STRENGTH_REDUCTION"]))
+    defense_w_bonuses = raw_defense * (
+        1
+        + shields
+        + military_bonus
+        + other_bonuses
+        - (int_fuelless * uas.GAME_CONFIG["BASE_FUELLESS_STRENGTH_REDUCTION"])
+        - (int_gaian * uas.GAME_CONFIG["GAIAN_DEFENSE_REDUCTION"])
+        + (int_peace * uas.GAME_CONFIG["PEACE_DEFENSE_BONUS"])
+    )
     return math.floor(defense_w_bonuses)
 
 def _calc_maxes(
     units,
+    kd_info_parse,
 ):
     maxes = {}
     maxes["defense"] = {
-        type_max: _calc_max_defense(type_units)
+        type_max: _calc_max_defense(type_units, gaian=kd_info_parse["race"] == "Gaian")
         for type_max, type_units in units.items() 
     }
     maxes["offense"] = {
-        type_max: _calc_max_offense(type_units)
+        type_max: _calc_max_offense(type_units, lumina=kd_info_parse["race"] == "Lumina")
         for type_max, type_units in units.items() 
     }
     return maxes
@@ -491,8 +555,8 @@ def _calc_max_recruits(kd_info, units):
         current_available_recruits = 0
     return max_available_recruits, current_available_recruits
 
-def _calc_recruit_time(is_conscription):
-    return uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_RECRUIT_TIME_MULTIPLIER"] * (1 - int(is_conscription) * uas.GAME_CONFIG["BASE_CONSCRIPTION_TIME_REDUCTION"])
+def _calc_recruit_time(is_conscription, time_multiplier):
+    return uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * time_multiplier * (1 - int(is_conscription) * uas.GAME_CONFIG["BASE_CONSCRIPTION_TIME_REDUCTION"])
 
 def _get_units_adjusted_costs(state):
     is_unregulated = "Unregulated" in state["state"]["active_policies"]
@@ -530,9 +594,14 @@ def _get_mobis(kd_id):
     generals_units = kd_info_parse["generals_out"]
     mobis_units = mobis_info_parse
 
-    start_time = datetime.datetime.now(datetime.timezone.utc)
+    state = _get_state()
+
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
     units = _calc_units(start_time, current_units, generals_units, mobis_units)
-    maxes = _calc_maxes(units)
+    maxes = _calc_maxes(units, kd_info_parse)
 
     top_queue = sorted(
         mobis_info_parse,
@@ -543,9 +612,8 @@ def _get_mobis(kd_id):
     galaxies_inverted, _ = _get_galaxies_inverted()
     galaxy_policies, _ = _get_galaxy_politics(kd_id, galaxies_inverted[kd_id])
     is_conscription = "Conscription" in galaxy_policies["active_policies"]
-    recruit_time = _calc_recruit_time(is_conscription)
+    recruit_time = _calc_recruit_time(is_conscription, (uas.GAME_CONFIG["BASE_RECRUIT_TIME_MIN_MULTIPLIER"] + uas.GAME_CONFIG["BASE_RECRUIT_TIME_MAX_MUTLIPLIER"]) / 2)
 
-    state = _get_state()
     units_adjusted_costs = _get_units_adjusted_costs(state)
 
     max_hangar_capacity, current_hangar_capacity = _calc_hangar_capacity(kd_info_parse, units)
@@ -562,6 +630,7 @@ def _get_mobis(kd_id):
         'units_desc': units_adjusted_costs,
         'top_queue': top_queue,
         'len_queue': len_queue,
+        'is_conscription': is_conscription,
         }
     return payload
 
@@ -642,7 +711,12 @@ def _get_structures_info(kd_id):
     current_structures = kd_info_parse["structures"]
     building_structures = structures_info_parse["structures"]
 
-    start_time = datetime.datetime.now(datetime.timezone.utc)
+    state = _get_state()
+
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
     structures = _calc_structures(start_time, current_structures, building_structures)
 
     max_available_structures, current_available_structures = _calc_available_structures(current_price, kd_info_parse, structures)
@@ -774,7 +848,20 @@ def _get_settle_queue(kd_id):
 
 
 def _get_settle_price(kd_info, is_expansionist):
-    return uas.GAME_FUNCS["BASE_SETTLE_COST"](int(kd_info["stars"])) * (1 - int(is_expansionist) * uas.GAME_CONFIG["BASE_EXPANSIONIST_SETTLE_REDUCTION"])
+    return (
+        uas.GAME_FUNCS["BASE_SETTLE_COST"](int(kd_info["stars"]))
+        * (
+            1
+            - (int(is_expansionist) * uas.GAME_CONFIG["BASE_EXPANSIONIST_SETTLE_REDUCTION"])
+            - (int(kd_info["race"] == "Gaian") * uas.GAME_CONFIG["GAIAN_SETTLE_COST_REDUCTION"])
+        )
+    )
+
+def _get_settle_time(kd_info, time_multiplier):
+    seconds = uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * time_multiplier * (
+        1 - (int(kd_info["race"] == "Gaian") * uas.GAME_CONFIG["GAIAN_SETTLE_TIME_REDUCTION"])
+    )
+    return seconds
 
 def _get_available_settle(kd_info, settle_info, is_expansionist):
     max_settle = uas.GAME_FUNCS["BASE_MAX_SETTLE"](int(kd_info["stars"]))
@@ -817,9 +904,18 @@ def _get_settle(kd_id):
     is_expansionist = "Expansionist" in galaxy_policies["active_policies"]
     settle_price = _get_settle_price(kd_info_parse, is_expansionist)
     max_settle, available_settle = _get_available_settle(kd_info_parse, settle_info, is_expansionist)
+    avg_settle_time = (
+        uas.GAME_CONFIG["BASE_SETTLE_TIME_MIN_MULTIPLIER"]
+        + uas.GAME_CONFIG["BASE_SETTLE_TIME_MAX_MUTLIPLIER"]
+    ) / 2
+    settle_time = _get_settle_time(
+        kd_info_parse, 
+        avg_settle_time,
+    )
 
     payload = {
         "settle_price": settle_price,
+        "settle_time": settle_time,
         "max_available_settle": max_settle,
         "current_available_settle": available_settle,
         "top_queue": top_queue,
@@ -881,16 +977,28 @@ def missiles():
 
     current_missiles = kd_info_parse["missiles"]
 
-    
+    max_available_missiles = math.floor(kd_info_parse["structures"]["missile_silos"]) * math.floor(
+        uas.GAME_CONFIG["BASE_MISSILE_SILO_CAPACITY"]
+        * (
+            1
+            + int(kd_info_parse["race"] == "Fuzi") * uas.GAME_CONFIG["FUZI_MISSILE_SILO_CAPACITY_INCREASE"]
+        )
+    )
+
+    cost_modifier = (
+        1
+        - int(kd_info_parse["race"] == "Fuzi") * uas.GAME_CONFIG["FUZI_MISSILE_COST_REDUCTION"]
+    )
 
     payload = {
         "current": current_missiles,
         "building": missiles_building,
         "build_time": uas.GAME_CONFIG["BASE_MISSILE_TIME_MULTIPLER"] * uas.GAME_CONFIG["BASE_EPOCH_SECONDS"],
-        "capacity": math.floor(kd_info_parse["structures"]["missile_silos"]) * uas.GAME_CONFIG["BASE_MISSILE_SILO_CAPACITY"],
+        "capacity": max_available_missiles,
         "desc": uas.MISSILES,
         "top_queue": top_queue,
         "len_queue": len_queue,
+        "cost_modifier": cost_modifier,
     }
 
     return (flask.jsonify(payload), 200)
@@ -906,7 +1014,13 @@ def _get_engineers_queue(kd_id):
     return engineers_info_parse["engineers"]
 
 def _calc_workshop_capacity(kd_info, engineers_building):
-    max_workshop_capacity = math.floor(kd_info["structures"]["workshops"]) * uas.GAME_CONFIG["BASE_WORKSHOP_CAPACITY"]
+    max_workshop_capacity = math.floor(kd_info["structures"]["workshops"]) * math.floor(
+        uas.GAME_CONFIG["BASE_WORKSHOP_CAPACITY"]
+        * (
+            1
+            - int(kd_info["race"] == "Xo") * uas.GAME_CONFIG["XO_WORKSHOP_CAPACITY_REDUCTION"]
+        )
+    )
     current_engineers = kd_info["units"]["engineers"]
     current_workshop_capacity = current_engineers + engineers_building
     return max_workshop_capacity, current_workshop_capacity
@@ -1165,6 +1279,40 @@ def _get_siphons_out(kd_id):
     
     siphons_out_info_parse = json.loads(siphons_out_info.text)
     return siphons_out_info_parse["siphons_out"]
+
+@app.route('/api/siphonsout', methods=['GET'])
+@flask_praetorian.auth_required
+def get_siphons_out():
+    kd_id = flask_praetorian.current_user().kd_id
+
+    siphons_out = _get_siphons_out(kd_id)
+    siphons_out_redacted = [
+        {
+            k: v
+            for k, v in item.items()
+            if k != "from"
+        }
+        for item in siphons_out
+    ]
+    return flask.jsonify(siphons_out_redacted), 200
+    
+def _get_history(kd_id):
+    history_info = REQUESTS_SESSION.get(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/history',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']}
+    )
+    
+    history_info_parse = json.loads(history_info.text)
+    return history_info_parse["history"]
+
+@app.route('/api/history', methods=['GET'])
+@flask_praetorian.auth_required
+def get_history():
+    kd_id = flask_praetorian.current_user().kd_id
+
+    history = _get_history(kd_id)
+    return flask.jsonify(history), 200
+
     
 @app.route('/api/time')
 @flask_praetorian.auth_required

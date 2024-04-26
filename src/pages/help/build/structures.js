@@ -36,7 +36,7 @@ function Structures(props) {
             </p>
             <p>
                 Structure cost increases with your stars at a rate of `(stars ^ {props.state.game_config?.BASE_STRUCTURE_STARS_POWER}) * {props.state.game_config?.BASE_STRUCTURE_COST_CONSTANT}`. 
-                The base construction time is {props.state.game_config?.BASE_EPOCH_SECONDS * props.state.game_config?.BASE_STRUCTURE_TIME_MULTIPLIER / 3600} hours.
+                The base average construction time is {props.state.game_config?.BASE_EPOCH_SECONDS * (props.state.game_config?.BASE_STRUCTURE_TIME_MIN_MULTIPLIER + props.state.game_config?.BASE_STRUCTURE_TIME_MAX_MUTLIPLIER) / 2 / 3600} hours.
             </p>
             <p>
                 When you have more structures than land (such as when you get attacked), your structures decrease at a rate of 
@@ -48,6 +48,11 @@ function Structures(props) {
                 The allocate page allows you to specify the target mix of structures that you would like the auto-spender to 
                 build towards. The auto-spender will prioritize building structures that are farther from their target. Both 
                 currently built and in-construction structures are considered when determining the "current" mix of buildings.
+            </p>
+            <p>
+                The Raze page allows you to raze structures to destroy them and 
+                receive {displayPercent(props.state.game_config?.BASE_STRUCTURES_RAZE_RETURN)} of the current build cost back. 
+                This can be useful if you have obsolete buildings and need to free up stars.
             </p>
             <Table striped bordered hover>
                 <thead>

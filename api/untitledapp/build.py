@@ -1,3 +1,4 @@
+import collections
 import datetime
 import json
 import math
@@ -11,6 +12,43 @@ import untitledapp.getters as uag
 import untitledapp.shared as uas
 from untitledapp import app, alive_required, REQUESTS_SESSION, SOCK_HANDLERS
 
+def _make_time_splits(min_time, max_time, num_splits):
+    assert num_splits % 2 == 0, "num_splits must be even"
+
+    splits = []
+    step = (min_time + max_time) / num_splits
+    for i in range(num_splits):
+        splits.append(min_time + step * i)
+
+    n_half = int(num_splits / 2)
+    middle_out_low_end = splits[(n_half - 1)::-1]
+    middle_out_high_end = splits[n_half:]
+
+    splits_middle_out = []
+    for i in range(n_half):
+        splits_middle_out.append(middle_out_high_end[i])
+        splits_middle_out.append(middle_out_low_end[i])
+    return splits_middle_out
+
+def _divide_across_splits(splits, amount):
+    len_splits = len(splits)
+    remainder = amount % len_splits
+    whole_splits = int(amount / len_splits)
+
+    remainder_splits = splits[:remainder]
+    if whole_splits:
+        map_splits = {
+            split: whole_splits + int(split in remainder_splits)
+            for split in splits
+        }
+    else:
+        map_splits = {
+            split: 1
+            for split in remainder_splits
+        }
+    return map_splits
+
+
 def _validate_recruits(recruits_input, current_available_recruits):
     if recruits_input > current_available_recruits:
         return False
@@ -18,6 +56,42 @@ def _validate_recruits(recruits_input, current_available_recruits):
         return False
 
     return True
+
+
+
+def _get_new_recruits(recruits_input, is_conscription, start_time):
+    time_splits = _make_time_splits(
+        uas.GAME_CONFIG["BASE_RECRUIT_TIME_MIN_MULTIPLIER"],
+        uas.GAME_CONFIG["BASE_RECRUIT_TIME_MAX_MUTLIPLIER"],
+        uas.GAME_CONFIG["BASE_RECRUIT_TIME_SPLITS"],
+    )
+    input_splits = _divide_across_splits(time_splits, recruits_input)
+
+    min_time = (
+        start_time
+        + datetime.timedelta(
+            seconds=uag._calc_recruit_time(
+                is_conscription,
+                min(input_splits.keys()),
+            )
+        )
+    ).isoformat()
+    new_recruits = [
+        {
+            "time": (
+                start_time
+                + datetime.timedelta(
+                    seconds=uag._calc_recruit_time(
+                        is_conscription,
+                        time_multiplier,
+                    )
+                )
+            ).isoformat(),
+            "recruits": amount,
+        }
+        for time_multiplier, amount in input_splits.items()
+    ]
+    return new_recruits, min_time
 
 @app.route('/api/recruits', methods=['POST'])
 @flask_praetorian.auth_required
@@ -40,8 +114,12 @@ def recruits():
     current_units = kd_info_parse["units"]
     generals_units = kd_info_parse["generals_out"]
     mobis_units = mobis_info_parse
+    state = uag._get_state()
 
-    start_time = datetime.datetime.now(datetime.timezone.utc)
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
     units = uag._calc_units(start_time, current_units, generals_units, mobis_units)
 
     max_available_recruits, current_available_recruits = uag._calc_max_recruits(kd_info_parse, units)
@@ -52,11 +130,11 @@ def recruits():
     galaxies_inverted, _ = uag._get_galaxies_inverted()
     galaxy_policies, _ = uag._get_galaxy_politics(kd_id, galaxies_inverted[kd_id])
     is_conscription = "Conscription" in galaxy_policies["active_policies"]
-    recruit_time = uag._calc_recruit_time(is_conscription)
 
-    mobis_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=recruit_time)).isoformat()
+    new_recruits, min_recruits_time = _get_new_recruits(recruits_input, is_conscription, start_time)
+
     next_resolve = kd_info_parse["next_resolve"]
-    next_resolve["mobis"] = min(next_resolve["mobis"], mobis_time)
+    next_resolve["mobis"] = min(next_resolve["mobis"], min_recruits_time)
     new_money = kd_info_parse["money"] - uas.GAME_CONFIG["BASE_RECRUIT_COST"] * recruits_input
     kd_payload = {'money': new_money, 'next_resolve': next_resolve}
     kd_patch_response = REQUESTS_SESSION.patch(
@@ -65,12 +143,7 @@ def recruits():
         data=json.dumps(kd_payload),
     )
     recruits_payload = {
-        "new_mobis": [
-            {
-                "time": mobis_time,
-                "recruits": recruits_input,
-            }
-        ]
+        "new_mobis": new_recruits
     }
     kd_patch_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/mobis',
@@ -102,6 +175,39 @@ def _validate_train_mobis(mobis_request, current_units, kd_info_parse, mobis_cos
     
     return True
     
+    
+
+def _get_new_mobis(mobis_request, start_time):
+    mobi_time_splits = _make_time_splits(
+        uas.GAME_CONFIG["BASE_SPECIALIST_TIME_MIN_MULTIPLIER"],
+        uas.GAME_CONFIG["BASE_SPECIALIST_TIME_MAX_MUTLIPLIER"],
+        uas.GAME_CONFIG["BASE_SPECIALIST_TIME_SPLITS"],
+    )
+    mobis_request_split = collections.defaultdict(dict)
+    for key_mobi, amt_mobi in mobis_request.items():
+        split_amt_mobi = _divide_across_splits(
+            mobi_time_splits,
+            amt_mobi,
+        )
+        for time_multiplier, amt_split in split_amt_mobi.items():
+            mobis_request_split[time_multiplier][key_mobi] = amt_split
+    
+    min_mobi_time = (
+        start_time
+        + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * min(mobis_request_split.keys()))
+    ).isoformat()
+
+    new_mobis = [
+        {
+            "time": (
+                start_time
+                + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * time_multiplier)
+            ).isoformat(),
+            **time_mobis,
+        }
+        for time_multiplier, time_mobis in mobis_request_split.items()
+    ]
+    return new_mobis, min_mobi_time
 
 @app.route('/api/mobis', methods=['POST'])
 @flask_praetorian.auth_required
@@ -121,6 +227,12 @@ def train_mobis():
     kd_info_parse = json.loads(kd_info.text)
 
     current_units = kd_info_parse["units"]
+    state = uag._get_state()
+
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
 
     mobis_request = {
         k: int(v or 0)
@@ -134,9 +246,10 @@ def train_mobis():
 
     new_money = kd_info_parse["money"] - mobis_cost
     new_recruits = kd_info_parse["units"]["recruits"] - sum(mobis_request.values())
-    mobis_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_SPECIALIST_TIME_MULTIPLIER"])).isoformat()
+
+    new_mobis, min_mobis_time = _get_new_mobis(mobis_request, start_time)
     next_resolve = kd_info_parse["next_resolve"]
-    next_resolve["mobis"] = min(next_resolve["mobis"], mobis_time)
+    next_resolve["mobis"] = min(next_resolve["mobis"], min_mobis_time)
     kd_payload = {
         'money': new_money,
         'units': {
@@ -151,12 +264,7 @@ def train_mobis():
         data=json.dumps(kd_payload),
     )
     mobis_payload = {
-        "new_mobis": [
-            {
-                "time": mobis_time,
-                **mobis_request,
-            }
-        ]
+        "new_mobis": new_mobis
     }
     mobis_patch_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/mobis',
@@ -237,6 +345,60 @@ def allocate_mobis():
     )
     return (flask.jsonify({"message": "Updated spending", "status": "success"}), 200)
 
+def _validate_disband(kd_info, input):
+
+    for key_unit, value_unit in input.items():
+        if value_unit < 0 or value_unit > kd_info["units"].get(key_unit, 0):
+            return False, "You do not have that many units to disband"
+    
+    if "engineers" in input.keys():
+        "You can't disband engineers"
+        
+    return True, ""
+
+@app.route('/api/mobis/disband', methods=['POST'])
+@flask_praetorian.auth_required
+@alive_required
+# @flask_praetorian.roles_required('verified')
+def disband_mobis():
+    req = flask.request.get_json(force=True)
+    req_input = {
+        k: int(v)
+        for k, v in req["input"].items()
+        if v not in ("", "0")
+    } 
+
+    kd_id = flask_praetorian.current_user().kd_id
+
+    kd_info = uag._get_kd_info(kd_id)
+
+    valid_disband, message = _validate_disband(kd_info, req_input)
+    if not valid_disband:
+        return (flask.jsonify({"message": message}), 400)
+    
+    new_units = {
+        key_unit: value_unit - req_input.get(key_unit, 0)
+        for key_unit, value_unit in kd_info["units"].items()
+    }
+    new_money = kd_info["money"] + sum([
+        uas.UNITS[key_unit].get("cost", 0) * value_unit * uas.GAME_CONFIG["BASE_DISBAND_COST_RETURN"]
+        for key_unit, value_unit in req_input.items()
+    ])
+    new_pop = kd_info["population"] + sum(req_input.values())
+
+    kd_payload = {
+        "units": new_units,
+        "money": new_money,
+        "population": new_pop,
+    }
+    patch_response = REQUESTS_SESSION.patch(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+        data=json.dumps(kd_payload),
+    )
+    
+    return (flask.jsonify({"message": "Disbanded units", "status": "success"}), 200)
+
 
 def _validate_structures(structures_input, current_available_structures):
     """Confirm that spending request is valid"""
@@ -250,6 +412,38 @@ def _validate_structures(structures_input, current_available_structures):
         return False
     
     return True
+
+def _get_new_structures(structures_request, start_time):
+    structure_time_splits = _make_time_splits(
+        uas.GAME_CONFIG["BASE_STRUCTURE_TIME_MIN_MULTIPLIER"],
+        uas.GAME_CONFIG["BASE_STRUCTURE_TIME_MAX_MUTLIPLIER"],
+        uas.GAME_CONFIG["BASE_STRUCTURE_TIME_SPLITS"],
+    )
+    structures_request_split = collections.defaultdict(dict)
+    for key_structure, amt_structure in structures_request.items():
+        split_amt_structure = _divide_across_splits(
+            structure_time_splits,
+            amt_structure,
+        )
+        for time_multiplier, amt_split in split_amt_structure.items():
+            structures_request_split[time_multiplier][key_structure] = amt_split
+    
+    min_structure_time = (
+        start_time
+        + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * min(structures_request_split.keys()))
+    ).isoformat()
+
+    new_structures = [
+        {
+            "time": (
+                start_time
+                + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * time_multiplier)
+            ).isoformat(),
+            **time_structures,
+        }
+        for time_multiplier, time_structures in structures_request_split.items()
+    ]
+    return new_structures, min_structure_time
 
 @app.route('/api/structures', methods=['POST'])
 @flask_praetorian.auth_required
@@ -279,7 +473,12 @@ def build_structures():
     current_structures = kd_info_parse["structures"]
     building_structures = structures_info_parse["structures"]
 
-    start_time = datetime.datetime.now(datetime.timezone.utc)
+    state = uag._get_state()
+
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
     structures = uag._calc_structures(start_time, current_structures, building_structures)
 
     max_available_structures, current_available_structures = uag._calc_available_structures(current_price, kd_info_parse, structures)
@@ -293,9 +492,9 @@ def build_structures():
     if not valid_structures:
         return (flask.jsonify({"message": 'Please enter valid structures values'}), 400)
 
-    structures_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_STRUCTURE_TIME_MULTIPLIER"])).isoformat()
+    new_structures, min_structures_time = _get_new_structures(structures_request, start_time)
     next_resolve = kd_info_parse["next_resolve"]
-    next_resolve["structures"] = min(next_resolve["structures"], structures_time)
+    next_resolve["structures"] = min(next_resolve["structures"], min_structures_time)
     new_money = kd_info_parse["money"] - sum(structures_request.values()) * current_price
     kd_payload = {'money': new_money, 'next_resolve': next_resolve}
     kd_patch_response = REQUESTS_SESSION.patch(
@@ -304,12 +503,7 @@ def build_structures():
         data=json.dumps(kd_payload),
     )
     structures_payload = {
-        "new_structures": [
-            {
-                "time": structures_time,
-                **structures_request,
-            }
-        ]
+        "new_structures": new_structures
     }
     structures_patch_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/structures',
@@ -370,6 +564,58 @@ def allocate_structures():
     )
     return (flask.jsonify({"message": "Updated spending", "status": "success"}), 200)
 
+def _validate_raze(kd_info, input):
+
+    for key_structure, value_structure in input.items():
+        if value_structure < 0 or value_structure > kd_info["structures"].get(key_structure, 0):
+            return False, "You do not have that many structures to raze"
+        
+    return True, ""
+
+@app.route('/api/structures/raze', methods=['POST'])
+@flask_praetorian.auth_required
+@alive_required
+# @flask_praetorian.roles_required('verified')
+def raze_structures():
+    req = flask.request.get_json(force=True)
+    req_input = {
+        k: int(v)
+        for k, v in req["input"].items()
+        if v not in ("", "0")
+    } 
+
+    kd_id = flask_praetorian.current_user().kd_id
+
+    kd_info = uag._get_kd_info(kd_id)
+
+    valid_raze, message = _validate_raze(kd_info, req_input)
+    if not valid_raze:
+        return (flask.jsonify({"message": message}), 400)
+    
+    structures_price = uag._get_structure_price(kd_info)
+
+    new_structures = {
+        key_structure: math.floor(value_structure - req_input.get(key_structure, 0))
+        for key_structure, value_structure in kd_info["structures"].items()
+    }
+    new_money = kd_info["money"] + sum([
+        structures_price * value_structures * uas.GAME_CONFIG["BASE_STRUCTURES_RAZE_RETURN"]
+        for value_structures in req_input.values()
+    ])
+
+    kd_payload = {
+        "structures": new_structures,
+        "money": new_money,
+    }
+    patch_response = REQUESTS_SESSION.patch(
+        os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}',
+        headers={'x-functions-key': os.environ['AZURE_FUNCTIONS_HOST_KEY']},
+        data=json.dumps(kd_payload),
+    )
+    
+    return (flask.jsonify({"message": "Razed structures", "status": "success"}), 200)
+
+
 def _validate_settles(settle_input, kd_info, settle_info, is_expansionist):
     max_settle, available_settle = uag._get_available_settle(kd_info, settle_info, is_expansionist)
     if settle_input <= 0:
@@ -379,6 +625,39 @@ def _validate_settles(settle_input, kd_info, settle_info, is_expansionist):
 
     return True
 
+def _get_new_settles(kd_info_parse, settle_input, start_time):
+    settle_time_splits = _make_time_splits(
+        uas.GAME_CONFIG["BASE_SETTLE_TIME_MIN_MULTIPLIER"],
+        uas.GAME_CONFIG["BASE_SETTLE_TIME_MAX_MUTLIPLIER"],
+        uas.GAME_CONFIG["BASE_SETTLE_TIME_SPLITS"],
+    )
+    settle_splits = _divide_across_splits(settle_time_splits, settle_input)
+
+    min_settle_time = (
+        start_time
+        + datetime.timedelta(
+            seconds=uag._get_settle_time(
+                kd_info_parse,
+                min(settle_splits.keys()),
+            )
+        )
+    ).isoformat()
+    new_settles = [
+        {
+            "time": (
+                start_time
+                + datetime.timedelta(
+                    seconds=uag._get_settle_time(
+                        kd_info_parse,
+                        time_multiplier,
+                    )
+                )
+            ).isoformat(),
+            "amount": amount,
+        }
+        for time_multiplier, amount in settle_splits.items()
+    ]
+    return new_settles, min_settle_time
 
 @app.route('/api/settle', methods=['POST'])
 @flask_praetorian.auth_required
@@ -406,11 +685,19 @@ def settle():
         return (flask.jsonify({"message": 'Please enter valid settle value'}), 400)
 
 
+
+    state = uag._get_state()
+
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
+    new_settles, min_settle_time = _get_new_settles(kd_info_parse, settle_input, start_time)
+
     settle_price = uag._get_settle_price(kd_info_parse, is_expansionist)
     new_money = kd_info_parse["money"] - settle_price * settle_input
-    settle_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_SETTLE_TIME_MULTIPLIER"])).isoformat()
     next_resolve = kd_info_parse["next_resolve"]
-    next_resolve["settles"] = min(next_resolve["settles"], settle_time)
+    next_resolve["settles"] = min(next_resolve["settles"], min_settle_time)
     kd_payload = {'money': new_money, "next_resolve": next_resolve}
     kd_patch_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}',
@@ -418,12 +705,7 @@ def settle():
         data=json.dumps(kd_payload),
     )
     settle_payload = {
-        "new_settles": [
-            {
-                "time": settle_time,
-                "amount": settle_input,
-            }
-        ]
+        "new_settles": new_settles,
     }
     kd_patch_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/settles',
@@ -438,8 +720,12 @@ def _validate_missiles(missiles_request, kd_info_parse, missiles_building, max_a
     missiles = {k: current_missiles.get(k, 0) + missiles_building.get(k, 0) for k in uas.MISSILES}
 
     missiles_available = {k: max_available_missiles - missiles.get(k, 0) for k in missiles}
-    costs = sum([uas.MISSILES[key_missile]["cost"] * value_missile for key_missile, value_missile in missiles_request.items()])
-    fuel_costs = sum([uas.MISSILES[key_missile]["fuel_cost"] * value_missile for key_missile, value_missile in missiles_request.items()])
+    cost_multiplier = (
+        1
+        - int(kd_info_parse["race"] == "Fuzi") * uas.GAME_CONFIG["FUZI_MISSILE_COST_REDUCTION"]
+    )
+    costs = sum([uas.MISSILES[key_missile]["cost"] * value_missile * cost_multiplier for key_missile, value_missile in missiles_request.items()])
+    fuel_costs = sum([uas.MISSILES[key_missile]["fuel_cost"] * value_missile * cost_multiplier for key_missile, value_missile in missiles_request.items()])
 
     if any((value < 0 for value in missiles_request.values())):
         return False
@@ -451,9 +737,9 @@ def _validate_missiles(missiles_request, kd_info_parse, missiles_building, max_a
         return False
     if fuel_costs > kd_info_parse["fuel"]:
         return False
-    if missiles_request["star_busters"] > 0 and "star_busters" not in kd_info_parse["completed_projects"]:
+    if missiles_request.get("star_busters", 0) > 0 and "star_busters" not in kd_info_parse["completed_projects"]:
         return False
-    if missiles_request["galaxy_busters"] > 0 and "galaxy_busters" not in kd_info_parse["completed_projects"]:
+    if missiles_request.get("galaxy_busters", 0) > 0 and "galaxy_busters" not in kd_info_parse["completed_projects"]:
         return False
     
     return True
@@ -479,21 +765,40 @@ def build_missiles():
     missiles_info = uag._get_missiles_info(kd_id)
     missiles_building = uag._get_missiles_building(missiles_info)
 
-    max_available_missiles = math.floor(kd_info_parse["structures"]["missile_silos"]) * uas.GAME_CONFIG["BASE_MISSILE_SILO_CAPACITY"]
+    max_available_missiles = math.floor(kd_info_parse["structures"]["missile_silos"]) * math.floor(
+        uas.GAME_CONFIG["BASE_MISSILE_SILO_CAPACITY"]
+        * (
+            1
+            + int(kd_info_parse["race"] == "Fuzi") * uas.GAME_CONFIG["FUZI_MISSILE_SILO_CAPACITY_INCREASE"]
+        )
+    )
 
     missiles_request = {
         k: int(v or 0)
         for k, v in req.items()
+        if v not in ("", 0)
     }
     valid_missiles = _validate_missiles(missiles_request, kd_info_parse, missiles_building, max_available_missiles)
     if not valid_missiles:
         return (flask.jsonify({"message": 'Please enter valid missiles values'}), 400)
 
-    costs = sum([uas.MISSILES[key_missile]["cost"] * value_missile for key_missile, value_missile in missiles_request.items()])
-    fuel_costs = sum([uas.MISSILES[key_missile]["fuel_cost"] * value_missile for key_missile, value_missile in missiles_request.items()])
+    cost_multiplier = (
+        1
+        - int(kd_info_parse["race"] == "Fuzi") * uas.GAME_CONFIG["FUZI_MISSILE_COST_REDUCTION"]
+    )
+    costs = sum([uas.MISSILES[key_missile]["cost"] * value_missile * cost_multiplier for key_missile, value_missile in missiles_request.items()])
+    fuel_costs = sum([uas.MISSILES[key_missile]["fuel_cost"] * value_missile * cost_multiplier for key_missile, value_missile in missiles_request.items()])
     new_money = kd_info_parse["money"] - costs
     new_fuel = kd_info_parse["fuel"] - fuel_costs
-    missiles_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_MISSILE_TIME_MULTIPLER"])).isoformat()
+
+    state = uag._get_state()
+
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
+
+    missiles_time = (start_time + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_MISSILE_TIME_MULTIPLER"])).isoformat()
     next_resolve = kd_info_parse["next_resolve"]
     next_resolve["missiles"] = min(next_resolve["missiles"], missiles_time)
     kd_payload = {
@@ -530,6 +835,33 @@ def _validate_engineers(engineers_input, current_available_engineers):
 
     return True
 
+
+def _get_new_engineers(engineers_input, start_time):
+    time_splits = _make_time_splits(
+        uas.GAME_CONFIG["BASE_ENGINEER_TIME_MIN_MULTIPLIER"],
+        uas.GAME_CONFIG["BASE_ENGINEER_TIME_MAX_MUTLIPLIER"],
+        uas.GAME_CONFIG["BASE_ENGINEER_TIME_SPLITS"],
+    )
+    input_splits = _divide_across_splits(time_splits, engineers_input)
+
+    min_time = (
+        start_time
+        + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * min(input_splits.keys()))
+    ).isoformat()
+    new_engineers = [
+        {
+            "time": (
+                start_time
+                + datetime.timedelta(
+                    seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * time_multiplier,
+                )
+            ).isoformat(),
+            "amount": amount,
+        }
+        for time_multiplier, amount in input_splits.items()
+    ]
+    return new_engineers, min_time
+
 @app.route('/api/engineers', methods=['POST'])
 @flask_praetorian.auth_required
 @alive_required
@@ -556,9 +888,15 @@ def train_engineers():
     if not valid_engineers:
         return (flask.jsonify({"message": 'Please enter valid recruits value'}), 400)
 
-    engineers_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=uas.GAME_CONFIG["BASE_EPOCH_SECONDS"] * uas.GAME_CONFIG["BASE_ENGINEER_TIME_MULTIPLIER"])).isoformat()
+    state = uag._get_state()
+
+    start_time = max(
+        datetime.datetime.now(datetime.timezone.utc),
+        datetime.datetime.fromisoformat(state["state"]["game_start"]).astimezone(datetime.timezone.utc)
+    )
+    new_engineers, min_engineers_time = _get_new_engineers(engineers_input, start_time)
     next_resolve = kd_info_parse["next_resolve"]
-    next_resolve["engineers"] = min(next_resolve["engineers"], engineers_time)
+    next_resolve["engineers"] = min(next_resolve["engineers"], min_engineers_time)
     new_money = kd_info_parse["money"] - uas.GAME_CONFIG["BASE_ENGINEER_COST"] * engineers_input
     kd_payload = {'money': new_money, 'next_resolve': next_resolve}
     kd_patch_response = REQUESTS_SESSION.patch(
@@ -567,12 +905,7 @@ def train_engineers():
         data=json.dumps(kd_payload),
     )
     engineers_payload = {
-        "new_engineers": [
-            {
-                "time": engineers_time,
-                "amount": engineers_input,
-            }
-        ]
+        "new_engineers": new_engineers
     }
     engineers_patch_response = REQUESTS_SESSION.patch(
         os.environ['AZURE_FUNCTION_ENDPOINT'] + f'/kingdom/{kd_id}/engineers',
@@ -594,6 +927,14 @@ def _validate_projects_target(req_targets, kd_info_parse):
         return False, "Target values must be less than 100%"
     if req_targets.get("spy_bonus", 0) > 0 and "drone_gadgets" not in kd_info_parse["completed_projects"]:
         return False
+    
+    completed_projects_targets = {
+        uas.PRETTY_NAMES.get(k, k): v
+        for k, v in req_targets.items()
+        if k in kd_info_parse["completed_projects"] and k in uas.ONE_TIME_PROJECTS
+    }
+    if sum(completed_projects_targets.values()) > 0:
+        return False, f"You can not allocate engineers to completed projects: {str(completed_projects_targets)}"
     
     return True, ""
 

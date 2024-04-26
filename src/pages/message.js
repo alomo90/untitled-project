@@ -11,6 +11,17 @@ import "./message.css";
 import HelpButton from "../components/helpbutton";
 
 function Message(props) {
+
+    useEffect(() => {
+        const updateFunc = () => {
+            authFetch("api/clearnotifs", {
+                method: "POST",
+                body: JSON.stringify({"categories": ["messages"]})
+            });
+        }
+        props.updateData(['notifs'], [updateFunc])
+    }, [])
+
     const [selected, setSelected] = useState(props.initialKd || undefined);
     const [message, setMessage] = useState("");
     const [results, setResults] = useState([]);
@@ -57,7 +68,7 @@ function Message(props) {
                 <div className="text-box message-box">
                     <span>{message.message}</span>
                 </div>
-                <span className="title-span" style={{textAlign: "right"}}>{kdFullLabel(props.data.kingdom.kdId) + "\n" + new Date(message.time).toLocaleString()}</span>
+                <span className="title-span" style={{textAlign: "right"}}>{kdFullLabel(message.with) + "\n" + new Date(message.time).toLocaleString()}</span>
             </div>
         }
     });

@@ -44,7 +44,7 @@ function KingdomContent(props) {
 function Kingdom(props) {
     
     return (
-        <div className="status">
+        <div className="status-kingdom-content">
             <div className="text-box kingdom-card">
                 <h4>{props.kingdoms[props.kdId] || ""} ({props.galaxies_inverted[props.kdId] || ""})</h4>
                 <br />
@@ -133,7 +133,7 @@ function getTimeString(date) {
     if (date === undefined) {
         return "--"
     }
-    const hours = Math.abs(Date.parse(date) - Date.now()) / 3.6e6;
+    const hours = Math.max((Date.parse(date) - Date.now()), 0) / 3.6e6;
     var n = new Date(0, 0);
     n.setSeconds(+hours * 60 * 60);
     return n.toTimeString().slice(0, 8);
